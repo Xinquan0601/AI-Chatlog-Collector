@@ -5,6 +5,7 @@ import {
   hrefFor, toQuery, navigate, showToast, showModal, copyText, truncate
 } from '../core.js';
 import { openExportDialog } from '../export-dialog.js';
+import { renderMarkdown } from '../markdown.js';
 
 const EVENT_TYPES = ['user_message', 'assistant_message', 'tool_call', 'tool_result'];
 const DEFAULT_EVENT_TYPES = ['user_message', 'assistant_message'];
@@ -238,6 +239,8 @@ function renderEvent(event) {
   } else if (type === 'tool_result') {
     body = '<div class="tool-name-row">' + (event.tool_name ? '<span class="tool-name">' + esc(event.tool_name) + '</span>' : '<span class="tag">TOOL RESULT</span>') + toolStatusBadge(toolStatus) + '</div>' +
       (content ? '<div class="event-content">' + formatRichText(content) + '</div>' : '<p class="modal-text">工具未返回文本输出。</p>');
+  } else if (isMessageType(type)) {
+    body = '<div class="event-content md">' + renderMarkdown(content || '（空消息）') + '</div>';
   } else {
     body = '<div class="event-content">' + formatRichText(content || '（空消息）') + '</div>';
   }
@@ -257,6 +260,10 @@ function renderEvent(event) {
     '</div></div></div>';
 }
 
+function isMessageType(type) {
+  return type === 'user_message' || type === 'assistant_message';
+}
+
 function toolStatusBadge(status) {
   if (!status) return '';
   const lower = String(status).toLowerCase();
@@ -271,8 +278,12 @@ async function openEvent(eventId) {
     const event = data.item;
     const input = event.tool_input !== undefined && event.tool_input !== null ? event.tool_input : event.tool_input_json;
     const raw = event.raw !== undefined && event.raw !== null ? event.raw : event.raw_json;
+    const content = event.content || '';
+    const contentHtml = isMessageType(event.type)
+      ? '<div class="event-content md markdown-full" id="event-full-content">' + renderMarkdown(content || '（空）') + '</div>'
+      : '<div class="full-content" id="event-full-content">' + esc(content || '（空）') + '</div>';
     const body = '<div class="meta-list" style="margin-bottom:12px"><div class="meta-item"><span class="meta-key">事件类型</span><span class="meta-value">' + esc(eventTypeLabel(event.type)) + ' · ' + esc(event.agent_key) + '</span></div><div class="meta-item"><span class="meta-key">时间</span><span class="meta-value mono">' + fmtFull(event.timestamp) + '</span></div>' + (event.tool_name ? '<div class="meta-item"><span class="meta-key">工具</span><span class="meta-value mono">' + esc(event.tool_name) + ' · ' + esc(event.tool_status || '—') + '</span></div>' : '') + '</div>' +
-      '<div class="modal-section-title">完整内容 · ' + num((event.content || '').length) + ' 字符</div><div class="full-content" id="event-full-content">' + esc(event.content || '（空）') + '</div>' +
+      '<div class="modal-section-title">完整内容 · ' + num(content.length) + ' 字符</div>' + contentHtml +
       (input !== null && input !== undefined ? '<details class="tool-details" style="margin-top:12px"><summary>工具入参 JSON</summary><pre class="tool-json">' + esc(prettyJson(input)) + '</pre></details>' : '') +
       (raw !== null && raw !== undefined ? '<details class="tool-details" style="margin-top:9px"><summary>原始记录</summary><pre class="tool-json">' + esc(prettyJson(raw)) + '</pre></details>' : '');
     const instance = showModal({
@@ -283,7 +294,7 @@ async function openEvent(eventId) {
       footer: '<button class="btn btn-ghost" type="button" data-modal-close>关闭</button><button class="btn btn-primary" type="button" data-copy-event>' + icon('copy') + '<span>复制内容</span></button>',
       onMount: function (element) {
         element.querySelector('[data-copy-event]').addEventListener('click', function () {
-          const text = element.querySelector('#event-full-content').textContent;
+          const text = content || element.querySelector('#event-full-content').textContent;
           copyText(text).then(function (ok) { showToast(ok ? '事件内容已复制' : '复制失败', ok ? 'success' : 'error'); });
         });
       }
