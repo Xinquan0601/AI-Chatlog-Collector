@@ -36,7 +36,7 @@ export async function render(params, token, signal) {
   const adapters = '<div class="table-wrap"><table class="data-table"><thead><tr><th>Agent</th><th>默认数据源</th><th>格式</th><th>规范化映射</th><th>状态</th></tr></thead><tbody>' +
     ADAPTERS.map(function (adapter) {
       const agent = agents.find(function (item) { return item.key === adapter.key; }) || {};
-      return '<tr><td><div class="stats-agent-row"><span class="agent-glyph" style="--agent-color:' + esc(agent.color || '#8a8478') + '">' + esc((adapter.name || '').slice(0, 2).toUpperCase()) + '</span><span class="cell-main">' + esc(adapter.name) + '</span></div></td><td class="mono" style="font-size:10.5px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(adapter.source) + '</td><td><span class="tag">' + esc(adapter.format) + '</span></td><td class="cell-sub">' + esc(adapter.mapping) + '</td><td>' + (agent.enabled ? '<span class="badge accent"><span class="dot"></span>已接入</span>' : '<span class="badge neutral">未启用</span>') + '</td></tr>';
+      return '<tr><td><div class="stats-agent-row"><span class="agent-glyph" style="--agent-color:' + esc(agent.color || '#8a8478') + '">' + esc((adapter.name || '').slice(0, 2).toUpperCase()) + '</span><span class="cell-main">' + esc(adapter.name) + '</span></div></td><td class="mono" style="font-size:10.5px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(adapter.source) + '">' + esc(adapter.source) + '</td><td><span class="tag">' + esc(adapter.format) + '</span></td><td class="cell-sub">' + esc(adapter.mapping) + '</td><td>' + (agent.enabled ? '<span class="badge accent"><span class="dot"></span>已接入</span>' : '<span class="badge neutral">未启用</span>') + '</td></tr>';
     }).join('') + '</tbody></table></div>';
 
   const eventCards = ['user_message', 'assistant_message', 'tool_call', 'tool_result'].map(function (type, index) {
@@ -79,19 +79,19 @@ export async function render(params, token, signal) {
       actions: '<span class="badge accent">v' + esc(version) + '</span><span class="badge neutral">' + coverage + ' AGENTS ENABLED</span>'
     }) +
     '<div class="doc-hero panel"><span class="doc-hero-icon">' + icon('book') + '</span><div><h2>从原始轨迹到可分析资产</h2><p>采集层只读访问各 Agent 的本地记录；规范化层将差异收敛为统一的四类事件；服务层负责增量同步、去重、任务调度与失败重试；WebUI 与 REST API 提供检索、统计、导出与运维能力。原始文件永远不会被修改。</p></div></div>' +
-    '<div class="overview-grid equal">' +
+    '<div class="overview-grid equal" style="align-items:start">' +
     '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">运行架构</h2><p class="panel-sub">单机部署 · Python 标准库 + SQLite</p></div><span class="badge neutral">5 LAYERS</span></div><div class="panel-body">' + arch + '</div></section>' +
     '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">采集流水线</h2><p class="panel-sub">从数据源到可导出事件</p></div><span class="badge accent">IDEMPOTENT</span></div><div class="panel-body">' + flow + '<div class="storage-note" style="margin-top:14px">失败任务会在同一任务内按指数退避自动重试；重试次数耗尽后保留错误详情，可手动重跑。单 Agent 同时只允许一个在途任务，避免游标竞争。</div></div></section>' +
     '</div>' +
     '<div class="section-head"><div><h2>Agent 适配器</h2><p>默认位置可通过 Agent 配置覆盖，支持任意兼容目录</p></div><div class="section-meta">' + num(agents.length) + ' REGISTERED</div></div>' +
     '<section class="panel"><div class="panel-body" style="padding-top:6px">' + adapters + '</div></section>' +
-    '<div class="overview-grid equal" style="margin-top:14px">' +
+    '<div class="overview-grid equal" style="align-items:start">' +
     '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">统一事件模型</h2><p class="panel-sub">所有 Agent 最终收敛为四类结构</p></div><span class="badge accent">4 TYPES</span></div><div class="panel-body">' + '<div class="model-grid" style="grid-template-columns:1fr 1fr">' + eventCards + '</div>' + '</div></section>' +
     '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">数据模型</h2><p class="panel-sub">SQLite 关系表与索引</p></div><span class="badge neutral">WAL · FK ON</span></div><div class="panel-body">' + model + '</div></section>' +
     '</div>' +
     '<div class="section-head"><div><h2>主要页面与交互</h2><p>同一套导航与筛选语义贯穿所有页面</p></div><div class="section-meta">WEBUI MAP</div></div>' +
     pages +
-    '<div class="overview-grid equal" style="margin-top:14px">' +
+    '<div class="overview-grid equal" style="align-items:start">' +
     '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">导出格式</h2><p class="panel-sub">为后续分析准备的数据包</p></div></div><div class="panel-body"><div class="model-list"><div class="model-card"><h4>ANALYSIS BUNDLE .ZIP</h4><p>events.csv · sessions.csv · summary.json · manifest.json · data_dictionary.md。推荐用于长期归档、交叉分析与复现。</p></div><div class="model-card"><h4>EVENTS CSV / JSONL</h4><p>扁平事件导出。字段包含 agent、session_id、event_type、timestamp、content、tool_call_id、tool_input_json、fingerprint、source_path。</p></div><div class="model-card"><h4>FILTER-AWARE</h4><p>导出继承 Agent、时间范围、事件类型、关键词与会话筛选；对话框中还可指定自定义起止日期、勾选四类事件角色，并先试算条数再下载。工具调用与结果通过 tool_call_id 关联。</p></div></div></div></section>' +
     '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">安全与运维边界</h2><p class="panel-sub">本机部署下的最小安全基线</p></div><span class="badge accent">LOCAL-FIRST</span></div><div class="panel-body"><div class="meta-list">' +
     ops('访问控制', '管理员 / 只读成员；写操作仅管理员，导出对所有登录成员开放。') +

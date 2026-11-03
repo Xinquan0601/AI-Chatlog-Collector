@@ -73,7 +73,7 @@ function draw(tab, query, data, signal) {
         '<td class="num">' + num(source.events_imported) + '</td>' +
         '<td class="cell-sub">' + esc(source.last_error || '—') + '</td></tr>';
     }).join('') : '<tr><td colspan="6" class="table-empty">尚未发现数据源</td></tr>';
-    table = '<section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Agent</th><th>来源路径</th><th>状态</th><th>最近同步</th><th>已导入</th><th>错误</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>' + pagination(data, 'logs', query);
+    table = '<section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Agent</th><th>来源路径</th><th>状态</th><th>最近同步</th><th class="num">已导入</th><th>错误</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>' + pagination(data, 'logs', query);
   }
 
   const header = pageHead({

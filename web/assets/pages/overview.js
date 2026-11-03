@@ -81,11 +81,11 @@ function draw(data) {
       '<td><span class="badge" style="border-color:color-mix(in srgb, ' + attr(session.agent_color) + ' 25%, transparent);color:' + attr(session.agent_color) + '">' + esc(session.agent_name) + '</span></td>' +
       '<td><div class="cell-main">' + fmtDate(session.started_at) + '</div><div class="cell-sub">' + fmtDuration(session.started_at, session.ended_at) + '</div></td>' +
       '<td><div class="mini-counts"><span><i style="background:var(--blue)"></i>' + num(session.message_count) + '</span><span><i style="background:var(--amber)"></i>' + num(session.tool_call_count) + '</span></div></td>' +
-      '<td class="num">' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</td>' +
+      '<td class="num col-wide">' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</td>' +
       '<td class="cell-actions"><a class="btn btn-ghost btn-xs" href="#/sessions/' + session.id + '">查看' + icon('arrow-right') + '</a></td></tr>';
   }).join('') : '<tr><td colspan="6" class="table-empty">暂无会话记录</td></tr>';
 
-  const recentPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">最近会话</h2><p class="panel-sub">按照开始时间排序的最近采集会话</p></div><div class="panel-actions"><a class="btn btn-ghost btn-xs" href="#/sessions">浏览全部' + icon('arrow-right') + '</a></div></div><div class="table-wrap" style="margin-top:8px"><table class="data-table"><thead><tr><th>会话</th><th>Agent</th><th>开始时间</th><th>消息 / 工具</th><th>Token</th><th></th></tr></thead><tbody>' + recentRows + '</tbody></table></div></section>';
+  const recentPanel = '<section class="panel"><div class="table-wrap"><table class="data-table fixed recent-table"><thead><tr><th>会话</th><th>Agent</th><th>开始时间</th><th>消息 / 工具</th><th class="num col-wide">Token</th><th></th></tr></thead><tbody>' + recentRows + '</tbody></table></div></section>';
 
   const actionButtons = '<button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button>' +
     (isAdmin() ? '<button class="btn btn-primary btn-sm" data-action="sync-all">' + icon('refresh') + '<span>同步全部</span></button>' : '') +
@@ -102,7 +102,7 @@ function draw(data) {
     '<div class="overview-grid"><div class="overview-stack">' + activity + topTools + '</div><div class="overview-stack">' + jobsPanel + storage + '</div></div>' +
     '<div class="section-head"><div><h2>Agent 接入状态</h2><p>当前工作站的采集覆盖面</p></div><div class="section-meta">' + num(agentEventTotal) + ' EVENTS ACROSS ' + agents.length + ' AGENTS · <a href="#/agents" style="color:var(--accent)">配置接入</a></div></div>' +
     agentStrip +
-    '<div class="section-head"><div><h2>最近会话</h2><p>快速回到最有价值的上下文</p></div><div class="section-meta">LAST 8 SESSIONS</div></div>' +
+    '<div class="section-head"><div><h2>最近会话</h2><p>快速回到最有价值的上下文</p></div><div class="section-actions"><span class="section-meta">LAST 8 SESSIONS</span><a class="btn btn-ghost btn-xs" href="#/sessions">浏览全部' + icon('arrow-right') + '</a></div></div>' +
     recentPanel +
     '</div>';
 

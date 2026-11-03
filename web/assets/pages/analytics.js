@@ -99,12 +99,12 @@ function draw(data, query, signal) {
 
   const toolMax = Math.max.apply(null, tools.map(function (tool) { return Number(tool.calls || 0); }).concat([1]));
   const toolsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">工具排行</h2><p class="panel-sub">调用量与异常分布</p></div><span class="badge neutral">TOP ' + Math.min(12, tools.length) + '</span></div><div class="panel-body" style="padding-top:8px">' +
-    (tools.length ? '<div class="table-wrap"><table class="data-table tools-table"><thead><tr><th>工具</th><th>调用</th><th>占比</th><th>异常</th></tr></thead><tbody>' + tools.map(function (tool) {
+    (tools.length ? '<div class="table-wrap"><table class="data-table fixed tools-table"><thead><tr><th>工具</th><th class="num">调用</th><th>占比</th><th class="num">异常</th></tr></thead><tbody>' + tools.map(function (tool) {
       return '<tr><td class="tool-name-cell">' + esc(tool.tool_name) + '</td><td class="num">' + num(tool.calls) + '</td><td><div class="bar-track"><i style="width:' + Math.max(4, Math.round(Number(tool.calls || 0) * 100 / toolMax)) + '%"></i></div></td><td class="num ' + (Number(tool.errors || 0) ? 'text-danger' : '') + '">' + num(tool.errors || 0) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : emptyState('暂无工具调用', '当前筛选范围内没有工具事件。', 'tool')) + '</div></section>';
 
   const projectsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">项目覆盖</h2><p class="panel-sub">事件最活跃的工作区</p></div><a class="btn btn-ghost btn-xs" href="#/sessions">浏览会话' + icon('arrow-right') + '</a></div><div class="panel-body" style="padding-top:6px">' +
-    (projects.length ? '<div class="table-wrap"><table class="data-table"><thead><tr><th>项目</th><th>会话</th><th>事件</th></tr></thead><tbody>' + projects.map(function (project) {
+    (projects.length ? '<div class="table-wrap"><table class="data-table fixed projects-table"><thead><tr><th>项目</th><th class="num">会话</th><th class="num">事件</th></tr></thead><tbody>' + projects.map(function (project) {
       return '<tr><td class="cell-main">' + esc(project.project) + '</td><td class="num">' + num(project.sessions) + '</td><td class="num">' + num(project.events) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : emptyState('暂无项目信息', '来源记录未提供工作区元数据。', 'folder')) + '</div></section>';
 
@@ -128,8 +128,8 @@ function draw(data, query, signal) {
 
   setView('<div class="page">' + header + chips + filterBar + kpis +
     '<div class="analytics-top">' + activity + typePanel + '</div>' +
-    '<div class="overview-grid equal" style="margin-top:14px">' + agentPanel + toolsPanel + '</div>' +
-    '<div class="overview-grid" style="margin-top:14px"><div class="overview-stack">' + projectsPanel + '</div><div class="overview-stack">' + exportPanel + '</div></div>' +
+    '<div class="overview-grid equal">' + agentPanel + toolsPanel + '</div>' +
+    '<div class="overview-grid"><div class="overview-stack">' + projectsPanel + '</div><div class="overview-stack">' + exportPanel + '</div></div>' +
     '</div>', function (root, sig) {
       root.addEventListener('submit', function (event) {
         const form = event.target.closest('#analytics-filter-form');

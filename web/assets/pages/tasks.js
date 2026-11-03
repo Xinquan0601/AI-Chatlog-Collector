@@ -67,7 +67,7 @@ function draw(data, query, signal) {
   });
 
   const html = '<div class="page">' + header + summary + filters +
-    '<section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Agent</th><th>状态</th><th>触发</th><th>进度</th><th>消息 / 异常</th><th>开始</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></section>' +
+    '<section class="panel"><div class="table-wrap"><table class="data-table tasks-table"><thead><tr><th>ID</th><th>Agent</th><th>状态</th><th class="col-trigger">触发</th><th class="col-progress">进度</th><th>消息 / 异常</th><th>开始</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></section>' +
     pagination(data, 'tasks', query) + '</div>';
 
   setView(html, function (root, sig) {

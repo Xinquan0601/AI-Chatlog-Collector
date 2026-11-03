@@ -36,7 +36,7 @@ function draw(data, signal) {
       '<td class="cell-actions"><a class="btn btn-ghost btn-xs" href="/api/backups/' + item.id + '/download"' + (item.exists === false ? ' aria-disabled="true" style="pointer-events:none;opacity:.4"' : '') + '>' + icon('download') + '<span>下载</span></a><button class="btn btn-ghost btn-xs danger" data-backup-delete="' + item.id + '" data-name="' + attr(item.filename) + '">' + icon('trash') + '</button></td></tr>';
   }).join('') : '<tr><td colspan="5" class="table-empty">还没有备份。建议在首次同步完成后创建第一份快照。</td></tr>';
 
-  const table = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">备份历史</h2><p class="panel-sub">保留最近 ' + Number(config.backup_retention || 7) + ' 份自动备份，旧文件会自动清理</p></div><span class="badge neutral">' + num(stats.count) + ' FILES</span></div><div class="table-wrap" style="margin-top:8px"><table class="data-table"><thead><tr><th>文件</th><th>大小</th><th>创建时间</th><th>状态</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  const table = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">备份历史</h2><p class="panel-sub">保留最近 ' + Number(config.backup_retention || 7) + ' 份自动备份，旧文件会自动清理</p></div><span class="badge neutral">' + num(stats.count) + ' FILES</span></div><div class="table-wrap" style="margin-top:8px"><table class="data-table"><thead><tr><th>文件</th><th class="num">大小</th><th>创建时间</th><th>状态</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
 
   const restore = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">恢复与迁移</h2><p class="panel-sub">离线恢复流程 · 请先停止服务</p></div><span class="badge amber">MANUAL</span></div><div class="panel-body"><div class="flow-steps">' +
     '<div class="flow-step"><span>STEP 01</span><strong>停止服务</strong><p>在运行服务的终端按 Ctrl+C，确保没有并发写入。</p></div>' +
@@ -53,7 +53,7 @@ function draw(data, signal) {
     actions: '<button class="btn btn-primary btn-sm" data-backup-create>' + icon('plus') + '<span>创建备份</span></button>'
   });
 
-  setView('<div class="page">' + header + hero + summary + table + '<div style="margin-top:14px">' + restore + '</div></div>', function (root, sig) {
+  setView('<div class="page">' + header + hero + summary + table + restore + '</div>', function (root, sig) {
     root.addEventListener('click', function (event) {
       const create = event.target.closest('[data-backup-create]');
       if (create) { event.preventDefault(); openCreate(); return; }

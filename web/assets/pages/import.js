@@ -234,7 +234,7 @@ function previewHtml(data) {
     '<div class="task-stat"><span>工具调用 / 结果</span><b>' + num(totals.tool_calls) + ' / ' + num(totals.tool_results) + '</b><small class="dim">TOOL EVENTS</small></div>' +
     '<div class="task-stat"><span>推理片段</span><b>' + num(totals.reasoning) + '</b><small class="dim">DEFAULT SKIP</small></div></div>' +
     warnings +
-    '<div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr><th>旧来源</th><th>Agent</th><th>会话</th><th>消息</th><th>工具调用 / 结果</th><th>推理</th><th>时间范围</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr><th>旧来源</th><th>Agent</th><th class="num">会话</th><th class="num">消息</th><th class="num">工具调用 / 结果</th><th class="num">推理</th><th>时间范围</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
     (sources.length ? '' : emptyState('导出库中没有会话', '确认文件是否来自旧版 chatlog 工具。', 'database')) + '</div>';
 }
 

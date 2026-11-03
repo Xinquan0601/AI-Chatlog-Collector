@@ -10,7 +10,8 @@ const FORMATS = {
   opencode: 'SQLite · read-only',
   workbuddy: 'JSONL · projects',
   deepseekharness: 'JSONL · zstd',
-  zcode: 'JSON / JSONL'
+  zcode: 'JSON / JSONL',
+  vscodecopilot: 'JSONL · workspaceStorage'
 };
 
 export async function render(params, token, signal) {
@@ -62,7 +63,7 @@ function draw(agents, signal) {
   const grid = agents.length ? '<div class="agent-grid">' + cards + '</div>' : '<div class="panel"><div class="panel-body">' + emptyState('还没有 Agent 适配器', '初始化数据目录后重试。', 'nodes') + '</div></div>';
 
   const header = pageHead({
-    eyebrow: 'COLLECTORS / 6 ADAPTERS',
+    eyebrow: 'COLLECTORS / ' + agents.length + ' ADAPTERS',
     title: 'Agent 接入',
     subtitle: '自由选择需要采集的 Agent。每个适配器只读取本地记录文件，统一映射为四类规范事件；关闭某个 Agent 不会删除已归档数据。',
     actions: '<button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新状态</span></button>' + (admin ? '<button class="btn btn-primary btn-sm" data-action="sync-all">' + icon('zap') + '<span>同步全部</span></button>' : '')
@@ -111,9 +112,12 @@ function agentLabel(key) {
 }
 
 function shortPath(path) {
-  const value = String(path || '');
-  if (value.length <= 34) return value;
-  return '…' + value.slice(-33);
+  let value = String(path || '').replace(/\\/g, '/');
+  value = value.replace(/^[A-Za-z]:\/Users\/[^/]+\//, '~/').replace(/^\/(home|Users)\/[^/]+\//, '~/');
+  if (value.length <= 38) return value;
+  const parts = value.split('/').filter(Boolean);
+  const tail = parts.slice(-2).join('/');
+  return tail.length + 2 <= 38 ? '…/' + tail : '…/' + parts[parts.length - 1];
 }
 
 async function syncAgent(key, button) {

@@ -383,7 +383,10 @@ export function legendSwatch(color) {
 
 export function stackedChart(daily, agents, options) {
   const opts = options || {};
-  const width = 880;
+  // match the viewBox to the available track width so tick labels keep a readable size
+  const narrow = typeof window !== 'undefined' && window.innerWidth < 760;
+  const avail = typeof window === 'undefined' ? 880 : Math.max(300, Math.min(880, window.innerWidth - (narrow ? 40 : 110)));
+  const width = opts.width || avail;
   const height = opts.height || 260;
   const margin = { top: 14, right: 12, bottom: 26, left: 38 };
   const plotW = width - margin.left - margin.right;

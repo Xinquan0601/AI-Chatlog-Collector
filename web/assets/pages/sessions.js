@@ -43,9 +43,9 @@ function draw(data, query, signal) {
       '<span class="session-title-text"><strong>' + esc(session.title) + '</strong><span>' + esc(session.project || '未标注项目') + ' · ' + esc(session.model || '未知模型') + '</span></span></a></td>' +
       '<td><span class="badge" style="border-color:color-mix(in srgb, ' + attr(session.agent_color) + ' 25%, transparent);color:' + attr(session.agent_color) + '">' + esc(session.agent_name) + '</span></td>' +
       '<td><div class="cell-main">' + fmtDate(session.started_at) + '</div><div class="cell-sub">' + fmtDuration(session.started_at, session.ended_at) + '</div></td>' +
-      '<td><div class="mini-counts"><span><i style="background:var(--blue)"></i>' + num(session.user_message_count || 0) + '</span><span><i style="background:var(--accent)"></i>' + num(session.assistant_message_count || 0) + '</span><span><i style="background:var(--amber)"></i>' + num(session.tool_call_count || 0) + '</span></div></td>' +
+      '<td class="col-wide"><div class="mini-counts"><span><i style="background:var(--blue)"></i>' + num(session.user_message_count || 0) + '</span><span><i style="background:var(--accent)"></i>' + num(session.assistant_message_count || 0) + '</span><span><i style="background:var(--amber)"></i>' + num(session.tool_call_count || 0) + '</span></div></td>' +
       '<td class="num">' + num(session.event_count || 0) + '</td>' +
-      '<td class="num">' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</td>' +
+      '<td class="num col-wide">' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</td>' +
       '<td class="cell-actions"><a class="btn btn-ghost btn-xs" href="#/sessions/' + session.id + '">打开' + icon('arrow-right') + '</a></td></tr>';
   }).join('') : '<tr><td colspan="7" class="table-empty">' + (hasFilter ? '没有符合筛选条件的会话' : '暂无会话，请先同步 Agent 数据') + '</td></tr>';
 
@@ -63,7 +63,7 @@ function draw(data, query, signal) {
 
   const quick = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap"><div class="filter-chips"><button class="chip ' + (activeRange === '24h' ? 'active' : '') + '" data-range="24h">24 小时</button><button class="chip ' + (activeRange === '7d' ? 'active' : '') + '" data-range="7d">7 天</button><button class="chip ' + (activeRange === '30d' ? 'active' : '') + '" data-range="30d">30 天</button><button class="chip ' + (activeRange === 'all' ? 'active' : '') + '" data-range="all">全部时间</button></div><div class="section-meta mono">' + num(data.total) + ' SESSIONS · PAGE ' + data.page + '/' + data.pages + '</div></div>';
 
-  const table = '<section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>会话</th><th>Agent</th><th>开始时间</th><th>用户 / 助手 / 工具</th><th>事件</th><th>Token</th><th></th></tr></thead><tbody>' + bodyRows + '</tbody></table></div></section>' +
+  const table = '<section class="panel"><div class="table-wrap"><table class="data-table fixed sessions-table"><thead><tr><th>会话</th><th>Agent</th><th>开始时间</th><th class="col-wide">用户 / 助手 / 工具</th><th class="num">事件</th><th class="num col-wide">Token</th><th></th></tr></thead><tbody>' + bodyRows + '</tbody></table></div></section>' +
     pagination(data, 'sessions', query);
 
   const header = pageHead({
