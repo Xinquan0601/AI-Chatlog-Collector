@@ -126,7 +126,15 @@ Query：
 
 ### GET /api/sessions/{id}
 
-Query：`event_type`（四类之一或 all）、`q`、`page`、`page_size`。
+Query：
+
+| 参数 | 说明 |
+|---|---|
+| event_type | 事件类型，逗号分隔的任意组合：`user_message` / `assistant_message` / `tool_call` / `tool_result`；`all` 或省略表示不过滤 |
+| q | 正文 / 工具名 / 工具入参关键词 |
+| page / page_size | 分页 |
+
+控制台默认只请求 `user_message,assistant_message`，工具调用与工具结果由勾选框按需加入。
 
 返回：
 

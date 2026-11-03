@@ -389,6 +389,39 @@ class StorageTests(unittest.TestCase):
             finally:
                 Path(exported["path"]).unlink(missing_ok=True)
 
+    def test_session_events_type_filter(self):
+        now = "2026-11-03T02:00:00.000Z"
+        batch = {
+            "source_path": "demo/filter.jsonl",
+            "sessions": [{"external_id": "s-filter", "title": "筛选会话", "project": "demo"}],
+            "events": [
+                {"session_external_id": "s-filter", "type": "user_message", "source_event_id": "u1", "sequence": 1, "timestamp": now, "content": "问题"},
+                {"session_external_id": "s-filter", "type": "assistant_message", "source_event_id": "a1", "sequence": 2, "timestamp": now, "content": "回答"},
+                {"session_external_id": "s-filter", "type": "tool_call", "source_event_id": "c1", "sequence": 3, "timestamp": now, "content": "", "tool_name": "grep", "tool_call_id": "call-1"},
+                {"session_external_id": "s-filter", "type": "tool_result", "source_event_id": "r1", "sequence": 4, "timestamp": now, "content": "结果", "tool_call_id": "call-1"},
+            ],
+            "errors": [],
+        }
+        with connection(self.db_path) as conn:
+            import_batch(conn, "codex", batch)
+            conn.commit()
+            session_id = list_sessions(conn)["items"][0]["id"]
+
+            messages = list_session_events(conn, session_id, event_type="user_message,assistant_message")
+            self.assertEqual(messages["total"], 2)
+            self.assertEqual([item["type"] for item in messages["items"]], ["user_message", "assistant_message"])
+
+            tools = list_session_events(conn, session_id, event_type="tool_call,tool_result")
+            self.assertEqual(tools["total"], 2)
+            self.assertEqual([item["type"] for item in tools["items"]], ["tool_call", "tool_result"])
+
+            everything = list_session_events(conn, session_id, event_type="all")
+            self.assertEqual(everything["total"], 4)
+
+            # Missing / unknown event types never filter the timeline down to nothing.
+            self.assertEqual(list_session_events(conn, session_id, event_type="")["total"], 4)
+            self.assertEqual(list_session_events(conn, session_id, event_type="unknown")["total"], 4)
+
     def test_export_formula_hardening(self):
         batch = {
             "source_path": "demo/formula.jsonl",

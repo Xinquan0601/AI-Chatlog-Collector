@@ -6,12 +6,36 @@ import {
 } from '../core.js';
 import { openExportDialog } from '../export-dialog.js';
 
-const EVENT_ORDER = ['all', 'user_message', 'assistant_message', 'tool_call', 'tool_result'];
+const EVENT_TYPES = ['user_message', 'assistant_message', 'tool_call', 'tool_result'];
+const DEFAULT_EVENT_TYPES = ['user_message', 'assistant_message'];
+
+function parseEventTypes(raw) {
+  if (!raw) return DEFAULT_EVENT_TYPES.slice();
+  if (raw === 'all') return EVENT_TYPES.slice();
+  const picked = raw.split(',').map(function (item) { return item.trim(); }).filter(function (item) {
+    return EVENT_TYPES.indexOf(item) >= 0;
+  });
+  if (!picked.length) return DEFAULT_EVENT_TYPES.slice();
+  return EVENT_TYPES.filter(function (type) { return picked.indexOf(type) >= 0; });
+}
+
+function isDefaultSelection(types) {
+  return types.length === DEFAULT_EVENT_TYPES.length && DEFAULT_EVENT_TYPES.every(function (type) {
+    return types.indexOf(type) >= 0;
+  });
+}
+
+// The default selection ("only messages") is the implicit state, so it stays out of the URL.
+function eventTypeParam(types) {
+  if (types.length >= EVENT_TYPES.length) return 'all';
+  if (isDefaultSelection(types)) return '';
+  return types.join(',');
+}
 
 export async function render(params, token, signal, id) {
   setView('<div class="page">' + skeletonDetail() + '</div>');
   const query = {
-    event_type: params.get('event_type') || 'all',
+    types: parseEventTypes(params.get('event_type')),
     q: params.get('q') || '',
     page: params.get('page') || '1',
     event_id: params.get('event_id') || ''
@@ -19,7 +43,7 @@ export async function render(params, token, signal, id) {
   let data;
   try {
     data = await api.get('/api/sessions/' + id + toQuery({
-      event_type: query.event_type,
+      event_type: query.types.join(','),
       q: query.q,
       page: query.page,
       page_size: 30
@@ -45,8 +69,9 @@ function draw(data, query, id, signal) {
   const events = eventsData.items || [];
   const agent = { key: session.agent_key, name: session.agent_name, color: session.agent_color };
   const totalMessages = Number(counts.user_message || 0) + Number(counts.assistant_message || 0);
-  const totalEvents = EVENT_ORDER.slice(1).reduce(function (sum, key) { return sum + Number(counts[key] || 0); }, 0);
-  const currentType = EVENT_ORDER.indexOf(query.event_type) >= 0 ? query.event_type : 'all';
+  const totalEvents = EVENT_TYPES.reduce(function (sum, key) { return sum + Number(counts[key] || 0); }, 0);
+  const allTypesSelected = query.types.length === EVENT_TYPES.length;
+  const defaultSelection = isDefaultSelection(query.types);
 
   const meta = session.metadata || {};
   const header = '<div class="detail-head"><a class="back-link" href="' + hrefFor('sessions', { agent: session.agent_key }) + '">' + icon('arrow-left') + '<span>返回会话列表</span></a>' +
@@ -61,19 +86,34 @@ function draw(data, query, id, signal) {
     '<div class="summary-cell"><b>' + num(counts.tool_result) + '</b><span>工具结果</span></div>' +
     '<div class="summary-cell"><b>' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</b><span>Token 合计</span></div></div>';
 
-  const pills = '<div class="filter-pills">' + EVENT_ORDER.map(function (type) {
-    const label = type === 'all' ? '全部' : eventTypeLabel(type);
-    const count = type === 'all' ? totalEvents : Number(counts[type] || 0);
-    return '<a class="pill ' + (currentType === type ? 'active' : '') + '" href="' + detailLink(id, query, { event_type: type, page: 1 }) + '">' + esc(label) + '<span class="count">' + count + '</span></a>';
+  const typeToggles = '<div class="type-filter" role="group" aria-label="按事件类型筛选">' + EVENT_TYPES.map(function (type) {
+    const checked = query.types.indexOf(type) >= 0;
+    const meta = eventMeta(type);
+    return '<label class="type-toggle' + (checked ? ' active' : '') + '" style="--type-color:' + attr(meta.color) + '">' +
+      '<input type="checkbox" value="' + type + '"' + (checked ? ' checked' : '') + '>' +
+      '<span class="type-toggle-box" aria-hidden="true">' + icon('check') + '</span>' +
+      '<span class="type-toggle-label">' + esc(eventTypeLabel(type)) + '</span>' +
+      '<span class="type-toggle-count mono">' + num(counts[type] || 0) + '</span>' +
+      '</label>';
   }).join('') + '</div>';
 
-  const toolbar = '<div class="timeline-toolbar">' + pills +
+  const typeActions = '<div class="type-filter-actions"><button class="link-btn" type="button" data-type-preset="all"' + (allTypesSelected ? ' disabled' : '') + '>全选</button><button class="link-btn" type="button" data-type-preset="messages"' + (defaultSelection ? ' disabled' : '') + '>仅消息</button></div>';
+
+  const toolbar = '<div class="timeline-toolbar"><div class="type-filter-wrap">' + typeToggles + typeActions + '</div>' +
     '<form id="event-filter-form" class="timeline-search"><div class="input-wrap"><span class="input-icon">' + icon('search') + '</span><input class="input" id="event-search" value="' + attr(query.q) + '" placeholder="搜索本会话内容…"></div></form></div>';
 
-  const feed = events.length ? events.map(function (event) { return renderEvent(event); }).join('') : emptyState(query.q || currentType !== 'all' ? '没有匹配的事件' : '本会话暂无事件', query.q || currentType !== 'all' ? '尝试调整搜索或筛选条件。' : '采集器可能只获取到会话元数据。', 'message');
+  let emptyTitle = '本会话暂无事件';
+  let emptyDesc = '采集器可能只获取到会话元数据。';
+  if (query.q) {
+    emptyTitle = '没有匹配的事件';
+    emptyDesc = '尝试调整关键词，或勾选更多事件类型。';
+  } else if (!allTypesSelected) {
+    emptyTitle = '当前筛选下没有事件';
+    emptyDesc = '勾选更多事件类型，即可查看工具调用与结果。';
+  }
+  const feed = events.length ? events.map(function (event) { return renderEvent(event); }).join('') : emptyState(emptyTitle, emptyDesc, 'message');
 
-  const pageParams = Object.assign({}, query);
-  delete pageParams.event_id;
+  const pageParams = { event_type: eventTypeParam(query.types), q: query.q };
   const paginationHtml = pagination(eventsData, 'sessions/' + id, pageParams);
 
   const timeline = '<section class="panel timeline-panel">' + toolbar +
@@ -108,6 +148,13 @@ function draw(data, query, id, signal) {
 
   setView(html, function (root, sig) {
     root.addEventListener('click', function (event) {
+      const preset = event.target.closest('[data-type-preset]');
+      if (preset) {
+        event.preventDefault();
+        const types = preset.dataset.typePreset === 'all' ? EVENT_TYPES.slice() : DEFAULT_EVENT_TYPES.slice();
+        navigate('sessions/' + id, { event_type: eventTypeParam(types), q: query.q }, true);
+        return;
+      }
       const open = event.target.closest('[data-event-open]');
       if (open) { event.preventDefault(); openEvent(open.dataset.eventOpen); return; }
       const copy = event.target.closest('[data-event-copy]');
@@ -127,12 +174,31 @@ function draw(data, query, id, signal) {
       }
     }, { signal: sig });
 
+    root.addEventListener('change', function (event) {
+      const box = event.target.closest('.type-filter input[type="checkbox"]');
+      if (!box) return;
+      const next = query.types.slice();
+      const index = next.indexOf(box.value);
+      if (box.checked && index < 0) {
+        next.push(box.value);
+      } else if (!box.checked && index >= 0) {
+        if (next.length === 1) {
+          box.checked = true;
+          showToast('至少保留一个事件类型', 'error');
+          return;
+        }
+        next.splice(index, 1);
+      }
+      const ordered = EVENT_TYPES.filter(function (type) { return next.indexOf(type) >= 0; });
+      navigate('sessions/' + id, { event_type: eventTypeParam(ordered), q: query.q }, true);
+    }, { signal: sig });
+
     root.addEventListener('submit', function (event) {
       const form = event.target.closest('#event-filter-form');
       if (!form) return;
       event.preventDefault();
       const q = root.querySelector('#event-search').value.trim();
-      navigate('sessions/' + id, { event_type: currentType, q: q }, true);
+      navigate('sessions/' + id, { event_type: eventTypeParam(query.types), q: q }, true);
     }, { signal: sig });
 
     if (query.event_id) {
@@ -152,17 +218,6 @@ function draw(data, query, id, signal) {
 
 function metaItem(key, value, mono) {
   return '<div class="meta-item"><span class="meta-key">' + esc(key) + '</span><span class="meta-value ' + (mono ? 'mono' : '') + '">' + esc(value) + '</span></div>';
-}
-
-function detailLink(id, query, overrides) {
-  const params = {
-    event_type: query.event_type === 'all' ? '' : query.event_type,
-    q: query.q,
-    page: query.page,
-    event_id: ''
-  };
-  Object.assign(params, overrides || {});
-  return '#/sessions/' + id + toQuery(params);
 }
 
 function renderEvent(event) {
