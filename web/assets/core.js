@@ -18,6 +18,7 @@ export const state = {
   currentSignal: null,
   analyticsFormat: 'bundle',
   activeJobs: 0,
+  importTimer: null,
   jobTimer: null,
   taskTimer: null,
   searchTimer: null

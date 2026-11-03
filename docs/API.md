@@ -249,6 +249,38 @@ Body：`{"note":"升级前快照"}`。返回新备份记录。
 
 ---
 
+## 旧数据导入  （管理员）
+
+把旧版 chatlog 导出库（sessions + messages + export_meta）迁入当前档案库。源文件以 mode=ro&immutable=1 只读打开，事件指纹使用旧库 row_id，重复导入自动去重。
+
+### GET /api/import/candidates
+
+返回档案库同目录下发现的导出库：items[]（path / name / size_bytes / sessions / messages / modified_at）。
+
+### GET /api/import/preview?path=...
+
+返回映射与规模：totals（sessions / messages / reasoning / tool_calls / tool_results / tokens）、sources[]（source、agent_key、supported、计数、时间范围）、warnings。路径无效返回 400 bad_source。
+
+### GET /api/import/runs?limit=20
+
+返回导入记录 items[] 与当前运行中的 active_run_id。每条含 status、progress、会话 / 事件统计、errors、warnings。
+
+### POST /api/import/runs
+
+Body：{"path":"D:/.../chatlog-export.db","include_reasoning":false,"dry_run":false}。返回 202 与 run_id；已有导入运行时返回 409 conflict。
+
+### GET /api/import/runs/{id}
+
+单次导入的进度与统计：processed_sessions / total_sessions、imported_sessions、imported_events、duplicate_events、skipped_messages、errors、warnings、progress。
+
+### POST /api/import/runs/{id}/cancel
+
+取消运行中的导入；该任务不在运行时返回 409。
+
+状态：queued → running → success / partial / failed / canceled；服务重启时遗留的 queued / running 会被标记为 interrupted。
+
+---
+
 ## 设置 / 用户 / 日志  （管理员）
 
 ### GET /api/settings

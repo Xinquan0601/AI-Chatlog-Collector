@@ -67,6 +67,7 @@
 - 统计分析：事件趋势（按 Agent 堆叠）、四类结构占比、Agent 分布、工具排行、项目覆盖。
 - 导出：事件 CSV、规范化 JSONL、分析包 ZIP（含数据字典与 manifest）。
 - 数据备份：SQLite Online Backup API + gzip，自动保留策略、下载、手动删除。
+- 旧版 chatlog 导出库导入：预览来源映射与规模，后台按会话迁移，按旧库行号去重，可取消、可重复执行。
 - 访问控制：管理员 / 只读成员；HttpOnly + SameSite=Strict Cookie；登录限流；同源请求校验。
 - 审计日志：登录、配置变更、导出、备份、用户管理。
 - 系统日志与源文件状态页，可定位采集失败原因。
@@ -215,6 +216,7 @@ data/                       # 运行时数据库、备份、日志（gitignore�
 | `events` | 四类规范事件 | `fingerprint UNIQUE`；session、agent+time、type+time、tool_name、tool_call_id 索引 |
 | `sources` | 每个文件 / DB 的游标 | `UNIQUE(agent_key, path)` |
 | `jobs` | 采集任务状态机 | status + Agent 索引 |
+| `import_runs` | 旧数据导入运行记录（进度、统计、断点） | status + id 索引 |
 | `users` / `web_sessions` | 成员与会话 | 用户名唯一；token 哈希存储 |
 | `audit_logs` / `system_logs` | 审计与运行日志 | 时间倒序索引 |
 | `backups` | 备份文件元数据 | 时间倒序索引 |
@@ -318,6 +320,7 @@ data/                       # 运行时数据库、备份、日志（gitignore�
 | **统计分析** | 7/30/90 天或自定义范围；Agent 过滤；趋势、结构、Agent、工具、项目；导出对话框 |
 | **Agent 接入** | 启用开关、数据源路径、匹配模式、间隔、重试、立即同步、重置游标 |
 | **采集任务** | 状态 / Agent 筛选；进度；重试；任务统计与错误详情；运行中自动刷新 |
+| **旧数据导入** | 自动发现 `data/` 下的 chatlog 导出库；预览来源映射与规模；可选导入推理；后台进度、取消、重新导入 |
 | **数据备份** | 创建备份、下载、删除；自动备份策略；恢复步骤 |
 | **日志与审计** | 系统日志、审计日志、源文件状态；级别/模块/Agent 筛选；详情 |
 | **系统设置** | 通用配置、采集策略、备份与导出、成员与权限、安全、系统信息 |
@@ -341,6 +344,29 @@ data/                       # 运行时数据库、备份、日志（gitignore�
 3. 进入统计分析，调整时间与 Agent。
 4. 点击「导出」，在对话框里选择时间范围（含自定义起止日期）与要包含的事件角色，确认试算条数后下载。
 5. 选择 ZIP 分析包时，压缩包内包含事件、会话、汇总、数据字典与 manifest。
+
+**从旧工具迁移**
+
+1. 打开「旧数据导入」，页面会自动列出 `data/` 下的 chatlog 导出库；也可以直接填写绝对路径。
+2. 点击「预览」确认来源映射、会话 / 消息规模与推理片段数量。
+3. 按需勾选「同时导入推理过程」，或先用「预演模式」核对将要写入的事件数。
+4. 点击「开始导入」，在右侧查看进度；完成后回到「会话记录」即可看到旧会话。
+
+### 旧数据导入
+
+旧版 chatlog 工具把全部记录导出为一个 SQLite 文件（`sessions` + `messages` + `export_meta`）。「旧数据导入」把这份文件迁入当前档案库，**不修改源文件**（以 `mode=ro&immutable=1` 只读打开）。
+
+| 旧 source | 当前 Agent | 说明 |
+|---|---|---|
+| codex / claudecode / zcode / workbuddy / vscodecopilot | 同名 Agent | 会话与四类事件直接映射 |
+| opencode-local / opencode-linux | opencode | 两个旧来源合并；外部 ID 加来源前缀避免碰撞 |
+| 其它 | — | 跳过并记入警告 |
+
+- 预览：会话数、消息数、工具调用 / 结果、推理片段、时间范围与映射结果。
+- 推理片段（`is_reasoning=1`）默认跳过；开启后写入为带 `reasoning: true` 元数据的助手消息。
+- 事件指纹固定为旧库 `row_id`，重复导入只补新增内容；会话外部 ID 取旧 `session_id`。
+- 旧库的 `project_path` / `parent_session_id` / `is_subagent` / token 统计保留在会话 `metadata_json`（`imported_from`、`legacy_source` 等字段）。
+- 导入在后台线程执行，进度与统计写入 `import_runs`；中断后重新导入会自动跳过已写入的部分。
 
 ---
 
@@ -462,6 +488,11 @@ Agent 级配置存于 `agents.config_json`：`roots、patterns、auto_sync、int
 | GET | `/api/tasks` | 登录 | 任务列表 |
 | POST | `/api/tasks/{id}/retry` | 管理员 | 重试任务 |
 | GET/POST | `/api/backups` | 管理员 | 备份列表 / 创建 |
+| GET | `/api/import/candidates` | 管理员 | 发现可导入的 chatlog 导出库 |
+| GET | `/api/import/preview?path=...` | 管理员 | 预览来源映射与规模 |
+| GET/POST | `/api/import/runs` | 管理员 | 导入记录 / 启动导入 |
+| GET | `/api/import/runs/{id}` | 管理员 | 单次导入进度与统计 |
+| POST | `/api/import/runs/{id}/cancel` | 管理员 | 取消运行中的导入 |
 | GET | `/api/backups/{id}/download` | 管理员 | 下载备份 |
 | DELETE | `/api/backups/{id}` | 管理员 | 删除备份 |
 | GET/PATCH | `/api/settings` | 管理员 | 系统设置 |

@@ -92,6 +92,7 @@ flowchart TB
 | 调度层 | `jobs.py` | 任务队列、工作线程、自动重试、定时调度、自动备份 |
 | 查询层 | `analytics.py` | 总览、统计、会话/事件查询、任务/日志、全局搜索 |
 | 导出层 | `exporting.py` | CSV / JSONL / JSON / ZIP、数据字典、manifest |
+| 迁移层 | `importing.py` | 旧 chatlog 导出库预览、按会话转换、后台导入运行与断点 |
 | 运维层 | `backup.py` / `db.py` | 在线备份、日志、配置、审计、表计数 |
 | 展示层 | `web/` | 登录、总览、会话、详情、统计、任务、备份、日志、设置、文档 |
 
@@ -151,6 +152,15 @@ flowchart TB
 3. gzip 压缩为 `agenttrail-YYYYMMDD-HHMMSS.db.gz`。
 4. 写入 `backups`，按保留策略删除旧备份。
 5. 记录系统日志与审计；下载通过受保护的 GET 接口完成。
+
+### 3.6 旧数据导入
+
+1. GET /api/import/candidates 扫描库所在目录，用 export_meta 识别旧 chatlog 导出库。
+2. GET /api/import/preview?path= 以 mode=ro&immutable=1 只读打开源库，按旧 source 统计会话 / 消息 / 推理 / 工具与时间范围，并给出映射结果。
+3. POST /api/import/runs 校验文件后写入一条 queued 运行记录，交给单后台线程执行；已有任务时返回 409。
+4. 工作线程按 session_pk 分块读取：每个会话把旧 messages 行转换成四类事件（工具结果按 FIFO 配对最近一次工具调用），再调用 ingestion.import_batch 写入，指纹固定为旧 row_id。
+5. 每完成一个会话推进 cursor_session_pk；轮询 GET /api/import/runs/{id} 读取进度，POST .../cancel 设置取消标记。
+6. 结束后写 success / partial / failed / canceled 与统计；服务启动时把遗留的 queued / running 标记为 interrupted，重新导入即可续传已写入部分。
 
 ---
 
@@ -232,13 +242,29 @@ queued ──> cancelled (预留)
 failed / partial / success ──> 手动重试（创建新任务）
 ```
 
-### 4.7 users / web_sessions
+### 4.7 import_runs
+
+字段：源文件路径 / 名称、status、options_json、total / processed / imported / skipped 会话数、imported / duplicate 事件数、skipped 消息数、cursor_session_pk、errors / warnings / summary、创建者与起止时间。
+
+状态机：
+
+```text
+queued ──> running ──> success
+                    ├─> partial
+                    ├─> failed
+                    └─> canceled
+queued / running ──> interrupted（服务重启时回收）
+```
+
+与 jobs 分开：导入不属于单个 Agent，且允许跨多个来源连续写入。
+
+### 4.8 users / web_sessions
 
 - 用户：用户名唯一（NOCASE）、password_hash、salt、role、active、must_change_password。
 - 会话：token_hash、user_id、expires_at、last_seen_at、ip、user_agent。
 - 服务端仅存哈希，原文 token 只在 Cookie 中。
 
-### 4.8 audit_logs / system_logs / backups / settings
+### 4.9 audit_logs / system_logs / backups / settings
 
 - 审计：动作、目标、详情、IP、时间；只追加。
 - 系统：级别、模块、消息、详情；供日志页与故障排查。

@@ -24,6 +24,7 @@ from chatvault.db import (
     migrate_agent_roots,
 )
 from chatvault.exporting import create_export, estimate_export
+from chatvault.importing import preview, run_import
 from chatvault.ingestion import import_batch, refresh_session_aggregates
 from chatvault.parsers import (
     parse_claude_jsonl,
@@ -442,6 +443,188 @@ class StorageTests(unittest.TestCase):
                 self.assertNotIn("assistant_message", lines[1] + lines[2])
             finally:
                 Path(exported["path"]).unlink(missing_ok=True)
+
+
+LEGACY_EXPORT_SCHEMA = """
+CREATE TABLE export_meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE sessions (
+    session_pk INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    tool TEXT,
+    session_id TEXT NOT NULL,
+    parent_session_id TEXT,
+    root_session_id TEXT,
+    is_subagent INTEGER NOT NULL DEFAULT 0,
+    project_path TEXT,
+    project_path_raw TEXT,
+    title TEXT,
+    display_title TEXT,
+    model TEXT,
+    start_ms INTEGER,
+    end_ms INTEGER,
+    archived_ms INTEGER,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    reasoning_tokens INTEGER DEFAULT 0,
+    cache_read_tokens INTEGER DEFAULT 0,
+    cache_write_tokens INTEGER DEFAULT 0,
+    msg_count INTEGER DEFAULT 0,
+    src_msg_count INTEGER DEFAULT 0,
+    user_msg_count INTEGER DEFAULT 0,
+    meta_json TEXT
+);
+CREATE TABLE messages (
+    row_id INTEGER PRIMARY KEY,
+    session_pk INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    is_reasoning INTEGER NOT NULL DEFAULT 0,
+    timestamp_ms INTEGER,
+    model TEXT,
+    text TEXT,
+    tool TEXT,
+    tool_status TEXT,
+    tool_input TEXT,
+    tool_output TEXT,
+    msg_uid TEXT
+);
+"""
+
+
+class LegacyImportTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.export_path = Path(self.temp.name) / "chatlog-export.db"
+        self.db_path = Path(self.temp.name) / "agenttrail.db"
+        self._make_export()
+        init_db(self.db_path)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _make_export(self):
+        bs = chr(92)
+        project_raw = "C:" + bs + "Users" + bs + "Administrator" + bs + "Desktop" + bs + "proj-a"
+        conn = sqlite3.connect(self.export_path)
+        try:
+            conn.executescript(LEGACY_EXPORT_SCHEMA)
+            conn.executemany(
+                "INSERT INTO export_meta(key, value) VALUES (?, ?)",
+                [("exported_at", "2026-11-03T12:00:00Z"), ("tool_version", "2.4.0"), ("filters_json", '{"include_reasoning": false}')],
+            )
+            conn.executemany(
+                "INSERT INTO sessions(session_pk, source, tool, session_id, project_path, project_path_raw,"
+                " title, display_title, model, start_ms, end_ms, input_tokens, output_tokens, msg_count,"
+                " user_msg_count, is_subagent, meta_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (1, "codex", "codex", "sess-codex", "C:/Users/Administrator/Desktop/proj-a", project_raw,
+                     None, None, "gpt-5", 1786000000000, 1786000060000, 1200, 340, 5, 1, 0, "{}"),
+                    (2, "opencode-local", "opencode", "ses_abc", "C:/Users/Administrator/Desktop/proj-b",
+                     "C:/Users/Administrator/Desktop/proj-b", None, "继续排查", "gpt-5", 1786000100000,
+                     1786000120000, 10, 5, 2, 1, 0, None),
+                    (3, "cursor", "cursor", "cursor-1", None, None, None, "未知来源", "x", 1786000200000,
+                     1786000210000, 0, 0, 1, 1, 0, None),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO messages(row_id, session_pk, seq, role, is_reasoning, timestamp_ms, model,"
+                " text, tool, tool_status, tool_input, tool_output, msg_uid)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (1, 1, 1, "user", 0, 1786000000000, None, "帮我看看这个 bug", None, None, None, None, "u1"),
+                    (2, 1, 2, "assistant", 1, 1786000010000, "gpt-5", "思考中", None, None, None, None, "r1"),
+                    (3, 1, 3, "assistant", 0, 1786000020000, "gpt-5", "好的，我先列一下目录", None, None, None, None, "a1"),
+                    (4, 1, 4, "tool_call", 0, 1786000030000, None, None, "exec_command", None, '{"cmd": "ls"}', None, "c1"),
+                    (5, 1, 5, "tool_result", 0, 1786000040000, None, None, None, "ok", None, "a.txt", "t1"),
+                    (6, 2, 1, "tool_result", 0, 1786000100000, None, None, None, "ok", None, "orphan output", "t2"),
+                    (7, 2, 2, "user", 0, 1786000110000, None, "继续", None, None, None, None, "u2"),
+                    (8, 3, 1, "user", 0, 1786000200000, None, "未知来源的消息", None, None, None, None, "u3"),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_preview_maps_old_sources(self):
+        info = preview(self.export_path)
+        self.assertEqual(info["totals"]["sessions"], 3)
+        self.assertEqual(info["totals"]["messages"], 8)
+        self.assertEqual(info["totals"]["reasoning"], 1)
+        self.assertEqual(info["totals"]["tool_calls"], 1)
+        self.assertEqual(info["totals"]["tool_results"], 2)
+        by_source = {item["source"]: item for item in info["sources"]}
+        self.assertEqual(by_source["codex"]["agent_key"], "codex")
+        self.assertEqual(by_source["opencode-local"]["agent_key"], "opencode")
+        self.assertFalse(by_source["cursor"]["supported"])
+        self.assertTrue(info["warnings"])
+        self.assertEqual(info["tool_version"], "2.4.0")
+
+    def test_import_session_events_and_tool_pairing(self):
+        result = run_import(self.export_path, db_path=self.db_path)
+        self.assertEqual(result["sessions_imported"], 2)
+        self.assertEqual(result["sessions_skipped"], 1)
+        self.assertEqual(result["events_inserted"], 6)
+        self.assertEqual(result["skipped_reasoning"], 1)
+        self.assertEqual(result["duplicates"], 0)
+        self.assertFalse(result["errors"])
+        self.assertTrue(any("cursor" in item for item in result["warnings"]))
+
+        with connection(self.db_path) as conn:
+            row = conn.execute("SELECT * FROM sessions WHERE external_id = ?", ("sess-codex",)).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["title"], "帮我看看这个 bug")
+            self.assertEqual(row["project"], "proj-a")
+            self.assertEqual(row["cwd"], "C:" + chr(92) + "Users" + chr(92) + "Administrator" + chr(92) + "Desktop" + chr(92) + "proj-a")
+            self.assertEqual(row["tokens_input"], 1200)
+            meta = json.loads(row["metadata_json"])
+            self.assertEqual(meta["imported_from"], "chatlog")
+            self.assertEqual(meta["legacy_source"], "codex")
+            self.assertFalse(meta["is_subagent"])
+
+            types = [item["type"] for item in conn.execute(
+                "SELECT type FROM events WHERE session_id = ? ORDER BY sequence", (row["id"],)
+            )]
+            self.assertEqual(types, ["user_message", "assistant_message", "tool_call", "tool_result"])
+
+            call = conn.execute(
+                "SELECT * FROM events WHERE session_id = ? AND type = 'tool_call'", (row["id"],)
+            ).fetchone()
+            outcome = conn.execute(
+                "SELECT * FROM events WHERE session_id = ? AND type = 'tool_result'", (row["id"],)
+            ).fetchone()
+            self.assertEqual(call["tool_name"], "exec_command")
+            self.assertEqual(json.loads(call["tool_input_json"]), {"cmd": "ls"})
+            self.assertEqual(outcome["content"], "a.txt")
+            self.assertEqual(outcome["tool_call_id"], call["tool_call_id"])
+            self.assertEqual(outcome["tool_status"], "success")
+
+            other = conn.execute("SELECT * FROM sessions WHERE agent_key = 'opencode'").fetchone()
+            self.assertEqual(other["external_id"], "opencode-local:ses_abc")
+            orphan = conn.execute(
+                "SELECT * FROM events WHERE session_id = ? AND type = 'tool_result'", (other["id"],)
+            ).fetchone()
+            self.assertIsNone(orphan["tool_call_id"])
+
+    def test_import_is_idempotent(self):
+        first = run_import(self.export_path, db_path=self.db_path)
+        second = run_import(self.export_path, db_path=self.db_path)
+        self.assertEqual(second["events_inserted"], 0)
+        self.assertEqual(second["duplicates"], first["events_inserted"])
+        with connection(self.db_path) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            sessions = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        self.assertEqual(count, first["events_inserted"])
+        self.assertEqual(sessions, 2)
+
+    def test_reasoning_can_be_included(self):
+        result = run_import(self.export_path, include_reasoning=True, db_path=self.db_path)
+        self.assertEqual(result["skipped_reasoning"], 0)
+        with connection(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM events WHERE content = ? AND type = 'assistant_message'", ("思考中",)
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(json.loads(row["metadata_json"])["reasoning"], True)
 
 
 if __name__ == "__main__":

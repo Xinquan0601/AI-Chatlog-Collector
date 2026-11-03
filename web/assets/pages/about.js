@@ -21,7 +21,7 @@ export async function render(params, token, signal) {
     layer('CLIENT', '浏览器', ['WebUI SPA · 原生 ES Modules', 'Hash Router · 无外部 CDN', 'HttpOnly Cookie 会话'], 'blue') +
     layer('API', 'HTTP 服务', ['REST JSON API', '鉴权 / 同源校验 / 限流', '静态资源与下载'], 'accent') +
     layer('DOMAIN', '服务层', ['Collector Registry', 'Normalization Pipeline', 'Job Manager / Scheduler'], '') +
-    layer('SERVICES', '能力层', ['Incremental Sync', 'Dedup / Fingerprint', 'Analytics / Search', 'Export / Backup / Audit'], '') +
+    layer('SERVICES', '能力层', ['Incremental Sync', 'Dedup / Fingerprint', 'Analytics / Search', 'Export / Backup / Audit', 'Legacy Chatlog Import'], '') +
     layer('STORAGE', '持久化', ['SQLite WAL · 主库', 'gzip 快照 · 备份', 'ZIP / CSV / JSONL · 导出'], 'blue') +
     '</div>';
 
@@ -56,6 +56,7 @@ export async function render(params, token, signal) {
     '<div class="model-card"><h4>events</h4><p>核心规范表。type 限定四类；保留 tool_call_id、tool_input、tool_status、fingerprint、原始 JSON 引用。</p></div>' +
     '<div class="model-card"><h4>sources</h4><p>每个文件或数据库的增量游标、大小、mtime、最近同步、导入量与错误信息。</p></div>' +
     '<div class="model-card"><h4>jobs</h4><p>任务状态机：queued → running → success / partial / failed。记录重试次数、进度与统计快照。</p></div>' +
+    '<div class="model-card"><h4>import_runs</h4><p>旧数据导入运行记录：源文件、进度游标、会话 / 事件统计、错误与警告。与 jobs 分开，允许跨 Agent 连续写入。</p></div>' +
     '<div class="model-card"><h4>access &amp; ops</h4><p>users / web_sessions / audit_logs / system_logs / backups / settings，构成访问控制与运维闭环。</p></div>' +
     '</div>';
 

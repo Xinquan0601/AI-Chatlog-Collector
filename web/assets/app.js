@@ -13,6 +13,7 @@ import { render as renderSession } from './pages/session.js';
 import { render as renderAnalytics } from './pages/analytics.js';
 import { render as renderTasks } from './pages/tasks.js';
 import { render as renderBackups } from './pages/backups.js';
+import { render as renderImport } from './pages/import.js';
 import { render as renderLogs } from './pages/logs.js';
 import { render as renderSettings } from './pages/settings.js';
 import { render as renderAbout } from './pages/about.js';
@@ -25,6 +26,7 @@ const PAGES = {
   analytics: { title: '统计分析', nav: 'analytics', admin: false, render: renderAnalytics },
   tasks: { title: '采集任务', nav: 'tasks', admin: false, render: renderTasks },
   backups: { title: '数据备份', nav: 'backups', admin: true, render: renderBackups },
+  import: { title: '旧数据导入', nav: 'import', admin: true, render: renderImport },
   logs: { title: '日志与审计', nav: 'logs', admin: true, render: renderLogs },
   settings: { title: '系统设置', nav: 'settings', admin: true, render: renderSettings },
   about: { title: '架构与文档', nav: 'about', admin: false, render: renderAbout }

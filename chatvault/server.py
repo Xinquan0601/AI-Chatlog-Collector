@@ -79,6 +79,15 @@ from .db import (
 )
 from .exporting import ExportTooLarge, create_export, estimate_export
 from .ingestion import reset_source
+from .importing import (
+    ImportSourceError,
+    candidate_exports,
+    get_import_manager,
+    get_run,
+    list_runs,
+    preview as preview_import,
+    recover_stale_runs,
+)
 from .jobs import get_job_manager, init_job_manager
 from .paths import normalize_roots, profile_dir, username
 from .utils import json_dumps, json_loads, utc_now
@@ -508,6 +517,43 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._delete_backup(conn, int(match.group(1)))
             return
 
+        if path == "/api/import/candidates" and method == "GET":
+            self._require_role("admin")
+            self._send_json({"items": candidate_exports(self.db_path)})
+            return
+        if path == "/api/import/preview" and method == "GET":
+            self._require_role("admin")
+            self._import_preview(conn)
+            return
+        if path == "/api/import/runs" and method == "GET":
+            self._require_role("admin")
+            self._send_json({
+                "items": list_runs(conn, self._query_int("limit", 20, 1, 100)),
+                "active_run_id": get_import_manager().active_run_id(),
+            })
+            return
+        if path == "/api/import/runs" and method == "POST":
+            self._require_role("admin")
+            self._import_start(conn)
+            return
+        match = re.fullmatch(r"/api/import/runs/(\d+)", path)
+        if match and method == "GET":
+            self._require_role("admin")
+            item = get_run(conn, int(match.group(1)))
+            if not item:
+                raise APIError(404, "not_found", "导入记录不存在")
+            self._send_json({"item": item, "active_run_id": get_import_manager().active_run_id()})
+            return
+        match = re.fullmatch(r"/api/import/runs/(\d+)/cancel", path)
+        if match and method == "POST":
+            self._require_role("admin")
+            run_id = int(match.group(1))
+            if not get_import_manager().cancel(run_id):
+                raise APIError(409, "conflict", "该导入任务不在运行中")
+            self._audit(conn, "import.cancel", f"import_run:{run_id}")
+            self._send_json({"canceled": True})
+            return
+
         if path == "/api/settings" and method == "GET":
             self._require_role("admin")
             self._settings(conn)
@@ -923,6 +969,39 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._audit(conn, "backup.delete", f"backup:{backup_id}")
         self._send_json({"deleted": True})
 
+    # ------------------------------------------------------------------ legacy chatlog import
+    def _import_preview(self, conn: sqlite3.Connection) -> None:
+        target = (self._query("path") or "").strip()
+        if not target:
+            raise APIError(400, "bad_request", "请提供导出文件路径")
+        try:
+            data = preview_import(target)
+        except ImportSourceError as exc:
+            raise APIError(400, "bad_source", str(exc))
+        except OSError as exc:
+            raise APIError(400, "bad_source", f"读取文件失败：{exc}")
+        self._send_json(data)
+
+    def _import_start(self, conn: sqlite3.Connection) -> None:
+        body = self._json_body()
+        target = str(body.get("path") or "").strip()
+        if not target:
+            raise APIError(400, "bad_request", "请提供导出文件路径")
+        options = {
+            "include_reasoning": bool(body.get("include_reasoning")),
+            "dry_run": bool(body.get("dry_run")),
+        }
+        try:
+            run_id, error = get_import_manager().start(target, options, self.user["username"])
+        except ImportSourceError as exc:
+            raise APIError(400, "bad_source", str(exc))
+        except OSError as exc:
+            raise APIError(400, "bad_source", f"读取文件失败：{exc}")
+        if error or run_id is None:
+            raise APIError(409, "conflict", error or "无法启动导入")
+        self._audit(conn, "import.start", f"import_run:{run_id}", {"path": target, **options})
+        self._send_json({"run_id": run_id, "item": get_run(conn, run_id)}, 202)
+
     # ------------------------------------------------------------------ settings / users / logs / system
     def _settings(self, conn: sqlite3.Connection) -> None:
         settings = get_settings(conn)
@@ -1054,6 +1133,8 @@ def create_server(
     disable_scheduler: bool | None = None,
 ) -> tuple[AgentTrailServer, dict[str, Any]]:
     init_db(db_path)
+    get_import_manager().configure(db_path)
+    recover_stale_runs(db_path)
     with connection(db_path) as conn:
         created, password = ensure_default_admin(conn)
         cleanup_sessions(conn)

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -35,6 +37,42 @@ class HTTPTests(unittest.TestCase):
                 "errors": [],
             })
             conn.commit()
+        cls.export_path = Path(cls.temp.name) / "chatlog-export.db"
+        export = sqlite3.connect(cls.export_path)
+        try:
+            export.executescript(
+                """
+                CREATE TABLE export_meta (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE sessions (
+                    session_pk INTEGER PRIMARY KEY, source TEXT, tool TEXT, session_id TEXT,
+                    parent_session_id TEXT, root_session_id TEXT, is_subagent INTEGER DEFAULT 0,
+                    project_path TEXT, project_path_raw TEXT, title TEXT, display_title TEXT,
+                    model TEXT, start_ms INTEGER, end_ms INTEGER, archived_ms INTEGER,
+                    input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+                    reasoning_tokens INTEGER DEFAULT 0, cache_read_tokens INTEGER DEFAULT 0,
+                    cache_write_tokens INTEGER DEFAULT 0, msg_count INTEGER DEFAULT 0,
+                    src_msg_count INTEGER DEFAULT 0, user_msg_count INTEGER DEFAULT 0, meta_json TEXT
+                );
+                CREATE TABLE messages (
+                    row_id INTEGER PRIMARY KEY, session_pk INTEGER, seq INTEGER, role TEXT,
+                    is_reasoning INTEGER DEFAULT 0, timestamp_ms INTEGER, model TEXT, text TEXT,
+                    tool TEXT, tool_status TEXT, tool_input TEXT, tool_output TEXT, msg_uid TEXT
+                );
+                """
+            )
+            export.execute("INSERT INTO export_meta(key, value) VALUES ('tool_version', '2.4.0')")
+            export.execute(
+                "INSERT INTO sessions(session_pk, source, tool, session_id, title, start_ms, end_ms, msg_count)"
+                " VALUES (1, 'codex', 'codex', 'http-import', '导入的会话', 1786000000000, 1786000060000, 2)"
+            )
+            export.executemany(
+                "INSERT INTO messages(row_id, session_pk, seq, role, text, timestamp_ms)"
+                " VALUES (?, 1, ?, ?, ?, ?)",
+                [(1, 1, "user", "旧库里的话", 1786000000000), (2, 2, "assistant", "旧库里的回复", 1786000010000)],
+            )
+            export.commit()
+        finally:
+            export.close()
         cls.server, cls.info = create_server("127.0.0.1", 0, db_path=cls.db_path, disable_scheduler=True)
         cls.port = cls.info["port"]
         cls.base = f"http://127.0.0.1:{cls.port}"
@@ -140,6 +178,58 @@ class HTTPTests(unittest.TestCase):
         anonymous = self.opener()
         status, payload = self.call(anonymous, "/api/export/estimate")
         self.assertEqual(status, 401)
+
+    def test_04_legacy_import_api(self):
+        viewer = self.opener()
+        self.login(viewer, "viewer", "viewer-123")
+        status, _ = self.call(viewer, "/api/import/candidates")
+        self.assertEqual(status, 403)
+
+        admin = self.opener()
+        status, _ = self.login(admin, "admin", "test-admin-123")
+        self.assertEqual(status, 200)
+        status, payload = self.call(admin, "/api/import/candidates")
+        self.assertEqual(status, 200)
+        self.assertTrue(any(item["path"] == str(self.export_path) for item in payload["data"]["items"]))
+
+        status, payload = self.call(admin, "/api/import/preview?path=" + str(self.export_path).replace("+", "%2B"))
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["totals"]["sessions"], 1)
+        self.assertEqual(payload["data"]["sources"][0]["agent_key"], "codex")
+
+        status, payload = self.call(admin, "/api/import/preview")
+        self.assertEqual(status, 400)
+        status, payload = self.call(admin, "/api/import/preview?path=" + str(Path(self.temp.name) / "missing.db"))
+        self.assertEqual(status, 400)
+
+        status, payload = self.call(admin, "/api/import/runs", "POST", {"path": str(Path(self.temp.name) / "missing.db")}, csrf=False)
+        self.assertEqual(status, 403)
+        status, payload = self.call(admin, "/api/import/runs", "POST", {"path": str(Path(self.temp.name) / "missing.db")})
+        self.assertEqual(status, 400)
+
+        status, payload = self.call(admin, "/api/import/runs", "POST", {"path": str(self.export_path)})
+        self.assertEqual(status, 202)
+        run_id = payload["data"]["run_id"]
+        deadline = time.time() + 15
+        detail = None
+        while time.time() < deadline:
+            status, payload = self.call(admin, "/api/import/runs/" + str(run_id))
+            self.assertEqual(status, 200)
+            detail = payload["data"]["item"]
+            if detail["status"] not in ("queued", "running"):
+                break
+            time.sleep(0.2)
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["status"], "success")
+        self.assertEqual(detail["imported_sessions"], 1)
+        self.assertEqual(detail["imported_events"], 2)
+
+        status, payload = self.call(admin, "/api/import/runs?limit=5")
+        self.assertEqual(status, 200)
+        self.assertTrue(any(item["id"] == run_id for item in payload["data"]["items"]))
+
+        status, payload = self.call(admin, "/api/import/runs/999999/cancel", "POST", {})
+        self.assertEqual(status, 409)
 
 
 if __name__ == "__main__":

@@ -195,6 +195,34 @@ CREATE TABLE IF NOT EXISTS backups (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_backups_created ON backups(created_at DESC);
+
+-- Legacy chatlog import runs.  Kept outside jobs because an import is not tied
+-- to a single agent and may be resumed after a restart.
+CREATE TABLE IF NOT EXISTS import_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_path TEXT NOT NULL,
+    source_label TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    options_json TEXT NOT NULL DEFAULT '{}',
+    total_sessions INTEGER NOT NULL DEFAULT 0,
+    total_messages INTEGER NOT NULL DEFAULT 0,
+    processed_sessions INTEGER NOT NULL DEFAULT 0,
+    imported_sessions INTEGER NOT NULL DEFAULT 0,
+    skipped_sessions INTEGER NOT NULL DEFAULT 0,
+    imported_events INTEGER NOT NULL DEFAULT 0,
+    duplicate_events INTEGER NOT NULL DEFAULT 0,
+    skipped_messages INTEGER NOT NULL DEFAULT 0,
+    cursor_session_pk INTEGER NOT NULL DEFAULT 0,
+    errors_json TEXT,
+    warnings_json TEXT,
+    summary_json TEXT,
+    created_by TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_import_runs_status ON import_runs(status, id DESC);
 """
 
 
