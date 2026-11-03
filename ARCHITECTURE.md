@@ -9,7 +9,7 @@
 
 ### 必须满足
 
-1. 接入六类 Agent，可选择启用，不修改原始数据。
+1. 接入七类 Agent，可选择启用，不修改原始数据。
 2. 将异构记录统一规范化为四类结构。
 3. 支持按 Agent、时间范围统计与导出，导出结果可直接分析。
 4. 支持采集任务配置、进度监控、增量同步、幂等去重与失败重试。
@@ -334,6 +334,17 @@ failed / partial / success ──> 手动重试（创建新任务）
   - OpenAI 风格 `tool_calls`；
   - 内容 blocks 中的 `tool_use / tool_result`。
 - JSON 文件若实际是 JSONL，会自动回退逐行解析。
+
+**VS Code Copilot**
+
+- 会话文件位于 `workspaceStorage/<hash>/chatSessions/<uuid>.jsonl` 与 `globalStorage/emptyWindowChatSessions/*.jsonl`。
+- 文件是追加式日志：首行 `kind: 0` 为完整快照，后续 `kind: 1/2/3` 分别为「按路径赋值 / 按路径追加 / 删除」。
+- 解析器先回放补丁得到当前 `session` 对象，再读取 `requests[]`：
+  - `request.message.text` → user_message；
+  - `response[]` 中的 `text / markdownContent` → assistant_message；
+  - `thinking` → assistant_message（`metadata.reasoning = true`）；
+  - `toolInvocationSerialized` → tool_call + tool_result（`toolCallId` 关联，`resultDetails` / `resultError` 为结果）。
+- 因为 VS Code 会压缩重写文件，Copilot 来源不使用字节游标，而是整文件回放 + fingerprint 去重。
 
 ### 5.3 消息清洗
 

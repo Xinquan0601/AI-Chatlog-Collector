@@ -1,6 +1,6 @@
 # 迹录 · AgentTrail
 
-> 本地优先的 AI Agent 聊天记录管理器：接入 Codex、Claude Code、OpenCode、WorkBuddy、DeepSeek Harness、ZCode，将异构会话统一为四类结构，并提供检索、统计、导出、采集调度、权限、备份与审计能力。
+> 本地优先的 AI Agent 聊天记录管理器：接入 Codex、Claude Code、OpenCode、WorkBuddy、DeepSeek Harness、ZCode、VS Code Copilot，将异构会话统一为四类结构，并提供检索、统计、导出、采集调度、权限、备份与审计能力。
 
 ![version](https://img.shields.io/badge/version-1.0.0-6ef2c6)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776ab)
@@ -50,8 +50,9 @@
 
 ### 采集与同步
 
-- 六类内置 Agent 适配器，可在 WebUI 中自由启用 / 停用。
+- 七类内置 Agent 适配器，可在 WebUI 中自由启用 / 停用。
 - 每个 Agent 独立配置数据源路径、glob 模式、自动同步间隔、失败重试次数。
+- 采集路径按**当前系统用户**通配：配置里保存「~/...」，换账号或换机器后自动指向新的用户目录，无需手改「C:/Users/Administrator/...」。
 - JSONL 使用**字节游标**只消费完整换行；SQLite 使用消息更新时间增量读取；zstd 来源按文件大小/mtime 去重重扫。
 - 事件 **fingerprint 唯一索引**保证跨次幂等，重复扫描不会重复入库。
 - 单 Agent 同一时间只允许一个在途任务，避免游标竞争。
@@ -179,7 +180,7 @@ chatvault/
   server.py                 # HTTP / REST / 静态资源
   db.py                     # Schema、连接、配置、日志
   auth.py                   # 用户、密码、会话、限流
-  parsers.py                # 六类 Agent 解析与规范化
+  parsers.py                # 七类 Agent 解析与规范化
   collectors.py             # 数据源发现、增量读取、OpenCode SQLite
   ingestion.py              # 事务落库、会话聚合、去重、同步编排
   jobs.py                   # 工作线程、任务状态机、调度器
@@ -254,14 +255,36 @@ data/                       # 运行时数据库、备份、日志（gitignore�
 
 | Agent | 默认位置 | 格式 | 主要映射 |
 |---|---|---|---|
-| Codex | `~/.codex/sessions` | rollout JSONL | `response_item.message`、`function_call`、`function_call_output`；兼容 `event_msg.item_completed` 兜底 |
+| Codex | `~/.codex/sessions`、`~/.codex/archived_sessions` | rollout JSONL | `response_item.message`、`function_call`、`function_call_output`；兼容 `event_msg.item_completed` 兜底 |
 | Claude Code | `~/.claude/projects` | projects JSONL | `message.content` 中的 `text` / `tool_use` / `tool_result` |
-| OpenCode | `~/.local/share/opencode/opencode.db` | SQLite 只读 | `session_v2` + `session_message`；从 assistant content blocks 提取工具及结果 |
+| OpenCode | `~/.local/share/opencode/opencode.db`、`~/.local/share/opencode-linux/opencode.db` | SQLite 只读 | `session_v2` + `session_message`；从 assistant content blocks 提取工具及结果 |
 | WorkBuddy | `~/.workbuddy/projects` | projects JSONL | 兼容 CodeBuddy 消息结构；顶层 `function_call / function_call_result` 映射为工具链；清理 `<system-reminder>`，提取 `<user_query>` |
 | DeepSeek Harness | `~/.dsh/sessions` | `session.v4.jsonl.zstd` | `user/message`、`assistant/message`、`tool/result`；流式解压所有 zstd frame |
 | ZCode | `~/.zcode/sessions`、`~/.zcode/projects` | JSON / JSONL | `role/content`、`tool_calls`、`tool_use` / `tool_result`，支持嵌套 `messages` 文档 |
+| VS Code Copilot | `~/AppData/Roaming/Code/User/workspaceStorage`、`.../globalStorage/emptyWindowChatSessions` | JSONL 会话日志 | 回放 `kind 0/1/2/3` 快照与增量补丁，提取 `requests[].message`、响应文本、`toolInvocationSerialized` 工具调用与结果 |
 
-路径支持 `~` 与环境变量，可在 Agent 配置中覆盖为任意兼容目录。
+路径支持 `~`、`%APPDATA%`、`$HOME` 等环境变量，可在 Agent 配置中覆盖为任意兼容目录。
+
+### 采集目标与跨用户路径
+
+旧工具曾把采集目标写成固定账号（如 `C:/Users/Administrator/...`）；换到另一台机器或另一个 Windows 账号后，这些路径会全部失效。AgentTrail 统一把用户目录视为**当前用户**：
+
+| Agent | 旧工具中的采集目标 | 迁移后保存的模板 |
+|---|---|---|
+| Claude Code | `C:/Users/Administrator/.claude/projects` | `~/.claude/projects` |
+| Codex | `C:/Users/Administrator/.codex/sessions`、`archived_sessions` | `~/.codex/sessions`、`~/.codex/archived_sessions` |
+| OpenCode（Linux 数据） | `~/.local/share/opencode-linux/opencode.db` | `~/.local/share/opencode-linux/opencode.db` |
+| OpenCode（本机数据） | `~/.local/share/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` |
+| VS Code Copilot | `%APPDATA%/Code/User/workspaceStorage`、`globalStorage/emptyWindowChatSessions` | `~/AppData/Roaming/Code/User/...`（Windows） |
+| WorkBuddy | `C:/Users/Administrator/.workbuddy/projects` | `~/.workbuddy/projects` |
+| ZCode | `~/.zcode/sessions`、`~/.zcode/projects` | `~/.zcode/sessions`、`~/.zcode/projects` |
+
+规则：
+
+1. `~` 始终展开为**运行 AgentTrail 的当前用户**主目录；Windows 下是 `C:/Users/<当前用户>`，Linux 下是 `/home/<当前用户>`，macOS 下是 `/Users/<当前用户>`。
+2. 保存配置时，`C:/Users/Administrator/...`、`/home/administrator/...` 这类绝对路径会被自动改写成 `~/...`；`C:/Users/Public` 等系统目录不会被误改。
+3. 启动时自动迁移旧数据库中的绝对路径，并补齐新版本新增的默认根（例如 Codex `archived_sessions`、OpenCode Linux 数据库）。
+4. 环境变量同样可用：`%APPDATA%`（Windows）、`$HOME`、`$XDG_DATA_HOME` 等，先展开再归一化。
 
 ### 增量与去重
 

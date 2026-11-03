@@ -998,3 +998,300 @@ def parse_generic_jsonl(
                 result["events"], session["external_id"], agent_key.upper(), session.get("project")
             )
     return result
+
+
+# ---------------------------------------------------------------------------
+# VS Code Copilot chat logs
+# ---------------------------------------------------------------------------
+# VS Code stores each chat session as an append-only JSONL log.  The first line
+# is a full snapshot ({"kind": 0, "v": {...}}), later lines are small patches:
+#   kind 1 -> set the value at path k
+#   kind 2 -> push items v at path k (optional i truncates the array first)
+#   kind 3 -> delete the value at path k
+# Replaying the patches yields the current session object, whose "requests"
+# array holds the user message, the assistant response parts and tool calls.
+
+_COPILOT_MISSING = object()
+
+
+def _copilot_walk(root: Any, path: list[Any]) -> Any:
+    node = root
+    for key in path:
+        if isinstance(node, dict):
+            if key not in node:
+                return _COPILOT_MISSING
+            node = node[key]
+        elif isinstance(node, list) and isinstance(key, int) and 0 <= key < len(node):
+            node = node[key]
+        else:
+            return _COPILOT_MISSING
+    return node
+
+
+def _copilot_set(root: Any, path: list[Any], value: Any) -> None:
+    parent = _copilot_walk(root, path[:-1]) if len(path) > 1 else root
+    if parent is _COPILOT_MISSING:
+        return
+    key = path[-1]
+    if isinstance(parent, dict):
+        parent[key] = value
+    elif isinstance(parent, list) and isinstance(key, int) and 0 <= key < len(parent):
+        parent[key] = value
+
+
+def _copilot_push(root: Any, path: list[Any], items: Any, keep: Any) -> None:
+    parent = _copilot_walk(root, path[:-1]) if len(path) > 1 else root
+    if parent is _COPILOT_MISSING:
+        return
+    key = path[-1]
+    target = None
+    if isinstance(parent, dict):
+        target = parent.get(key)
+        if not isinstance(target, list):
+            target = []
+            parent[key] = target
+    elif isinstance(parent, list) and isinstance(key, int) and 0 <= key < len(parent):
+        target = parent[key]
+        if not isinstance(target, list):
+            target = []
+            parent[key] = target
+    if target is None:
+        return
+    if isinstance(keep, int) and keep >= 0:
+        del target[keep:]
+    if isinstance(items, list):
+        target.extend(items)
+
+
+def _copilot_delete(root: Any, path: list[Any]) -> None:
+    parent = _copilot_walk(root, path[:-1]) if len(path) > 1 else root
+    if parent is _COPILOT_MISSING:
+        return
+    key = path[-1]
+    if isinstance(parent, dict):
+        parent.pop(key, None)
+    elif isinstance(parent, list) and isinstance(key, int) and 0 <= key < len(parent):
+        parent[key] = None
+
+
+def _copilot_replay(lines: Iterable[str], errors: list[str]) -> dict[str, Any] | None:
+    state: dict[str, Any] | None = None
+    for line_no, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except (TypeError, ValueError):
+            errors.append(f"line {line_no}: invalid JSON")
+            continue
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("kind")
+        if kind == 0:
+            snapshot = entry.get("v")
+            state = snapshot if isinstance(snapshot, dict) else {}
+            continue
+        if state is None:
+            errors.append(f"line {line_no}: log is missing its initial snapshot")
+            continue
+        path = entry.get("k")
+        if not isinstance(path, list) or not path:
+            continue
+        if kind == 1:
+            _copilot_set(state, path, entry.get("v"))
+        elif kind == 2:
+            _copilot_push(state, path, entry.get("v"), entry.get("i"))
+        elif kind == 3:
+            _copilot_delete(state, path)
+    return state
+
+
+def _copilot_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [_copilot_text(item) for item in value]
+        return "\n".join(part for part in parts if part).strip()
+    if isinstance(value, dict):
+        for key in ("value", "text", "content", "markdown", "message"):
+            if key in value:
+                text = _copilot_text(value[key])
+                if text:
+                    return text
+    return ""
+
+
+def _copilot_tool_input(part: dict[str, Any]) -> Any:
+    payload: dict[str, Any] = {}
+    message = _copilot_text(part.get("invocationMessage"))
+    if message:
+        payload["message"] = message
+    specific = part.get("toolSpecificData")
+    if isinstance(specific, dict) and specific:
+        payload["data"] = specific
+    return payload or None
+
+
+def _copilot_result_text(part: dict[str, Any]) -> tuple[str, str]:
+    error = _copilot_text(part.get("resultError"))
+    if error:
+        return error, "error"
+    details = part.get("resultDetails")
+    if isinstance(details, dict):
+        output = details.get("output")
+        if isinstance(output, dict):
+            if output.get("type") == "data":
+                mime = output.get("mimeType") or "binary"
+                return f"[{mime} 数据已省略]", "success"
+            text = _copilot_text(output)
+            if text:
+                return text, "success"
+        text = _copilot_text(details.get("value") or details.get("text"))
+        if text:
+            return text, "success"
+    text = _copilot_text(details)
+    return (text, "success") if text else ("", "requested")
+
+
+def parse_vscode_copilot_jsonl(
+    lines: Iterable[str],
+    path: str,
+    fallback_time: str | None,
+    default_session_id: str | None,
+    *,
+    start_sequence: int = 0,
+) -> dict[str, Any]:
+    """Parse a VS Code Copilot chat session log into normalized events."""
+    source_path = str(path)
+    batch = ParsedBatch(
+        "vscodecopilot", source_path, fallback_time,
+        default_session_id or Path(source_path).stem,
+    )
+    state = _copilot_replay(lines, batch.errors)
+    if not isinstance(state, dict):
+        if not batch.errors:
+            batch.errors.append("会话日志为空")
+        return batch.finalize()
+
+    raw_requests = state.get("requests")
+    requests = raw_requests if isinstance(raw_requests, list) else []
+    if not requests:
+        return batch.finalize()
+
+    session_id = str(state.get("sessionId") or default_session_id or Path(source_path).stem)
+    creation = state.get("creationDate")
+    cwd = state.get("workingDirectory") or state.get("workspaceFolder") or state.get("cwd")
+    title = _copilot_text(state.get("customTitle") or state.get("title"))
+    total_input = 0
+    total_output = 0
+    for request in requests:
+        if not isinstance(request, dict):
+            continue
+        prompt = request.get("promptTokens")
+        completion = request.get("completionTokens")
+        if isinstance(prompt, (int, float)):
+            total_input += int(prompt)
+        if isinstance(completion, (int, float)):
+            total_output += int(completion)
+
+    batch.session(
+        session_id,
+        title=title,
+        cwd=cwd,
+        project=_derive_project(cwd),
+        started_at=creation,
+        tokens_input=total_input,
+        tokens_output=total_output,
+    )
+
+    for index, request in enumerate(requests):
+        if not isinstance(request, dict):
+            continue
+        request_id = str(request.get("requestId") or f"request-{index}")
+        base_sequence = start_sequence + (index + 1) * 1000
+        timestamp = request.get("timestamp")
+        model = request.get("modelId") or request.get("model")
+        user_text = _copilot_text(request.get("message"))
+        if user_text and not _is_injected_user_text(user_text):
+            batch.event(
+                session_id, "user_message",
+                source_event_id=f"{request_id}:user",
+                timestamp=timestamp,
+                content=user_text,
+                model=model,
+                sequence=base_sequence,
+                raw=request.get("message"),
+            )
+        response = request.get("response")
+        if isinstance(response, str):
+            response = [{"kind": "text", "value": response}]
+        if not isinstance(response, list):
+            continue
+        response_time = request.get("responseTimestamp") or timestamp
+        for part_index, part in enumerate(response):
+            if not isinstance(part, dict):
+                continue
+            kind = str(part.get("kind") or "")
+            sequence = base_sequence + part_index + 1
+            if kind in {"text", "markdownContent"}:
+                text = _copilot_text(part)
+                if text:
+                    batch.event(
+                        session_id, "assistant_message",
+                        source_event_id=f"{request_id}:text:{part_index}",
+                        timestamp=part.get("timestamp") or response_time,
+                        content=text,
+                        model=model,
+                        sequence=sequence,
+                        raw=part,
+                    )
+            elif kind == "thinking":
+                text = _copilot_text(part)
+                if text:
+                    batch.event(
+                        session_id, "assistant_message",
+                        source_event_id=f"{request_id}:thinking:{part_index}",
+                        timestamp=part.get("timestamp") or response_time,
+                        content=text,
+                        model=model,
+                        sequence=sequence,
+                        metadata={"reasoning": True},
+                        raw=part,
+                    )
+            elif kind == "toolInvocationSerialized":
+                call_id = str(part.get("toolCallId") or f"{request_id}:tool:{part_index}")
+                tool_name = str(part.get("toolId") or "unknown")
+                batch.event(
+                    session_id, "tool_call",
+                    source_event_id=f"{request_id}:tool:{part_index}",
+                    timestamp=part.get("startedAt") or response_time,
+                    content="",
+                    tool_name=tool_name,
+                    tool_call_id=call_id,
+                    tool_status="requested",
+                    tool_input=_copilot_tool_input(part),
+                    model=model,
+                    sequence=sequence,
+                    raw=part,
+                )
+                result_text, result_status = _copilot_result_text(part)
+                if result_text:
+                    batch.event(
+                        session_id, "tool_result",
+                        source_event_id=f"{request_id}:tool-result:{part_index}",
+                        timestamp=part.get("completedAt") or response_time,
+                        content=result_text,
+                        tool_call_id=call_id,
+                        tool_status=result_status,
+                        sequence=sequence + 1,
+                        raw=part,
+                    )
+    result = batch.finalize()
+    for session in result["sessions"]:
+        if not session.get("title") or session["title"].startswith("vscodecopilot ·"):
+            session["title"] = _derive_title_from_events(
+                result["events"], session["external_id"], "VS Code Copilot", session.get("project")
+            )
+    return result

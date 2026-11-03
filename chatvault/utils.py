@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .constants import DEFAULT_SETTINGS
+from .paths import expand_user_path, normalize_roots
 
 
 def utc_now() -> str:
@@ -86,14 +87,10 @@ def safe_json(value: Any, max_chars: int = 2_000_000) -> str | None:
 
 
 def expand_path(path: str) -> str:
+    """Expand "~" / environment variables into a resolved absolute path."""
     if not path:
         return path
-    text = os.path.expanduser(path.strip().strip('"'))
-    text = os.path.expandvars(text)
-    # Windows-style %VARS% are expanded by os.path.expandvars on Windows,
-    # but handle them explicitly for predictable cross-platform behavior.
-    for name, value in os.environ.items():
-        text = text.replace(f"%{name}%", value)
+    text = expand_user_path(path)
     try:
         return str(Path(text).expanduser().resolve())
     except OSError:
@@ -201,7 +198,8 @@ def parse_date_bound(value: str | None) -> str | None:
 
 
 def default_roots_for(defn: dict[str, Any]) -> list[str]:
-    return [str(Path(p).expanduser()) for p in defn.get("default_roots", [])]
+    """Default roots stay in portable ("~"/"%VAR%") form inside the database."""
+    return normalize_roots(defn.get("default_roots", []))
 
 
 def merge_settings(overrides: dict[str, Any] | None) -> dict[str, Any]:

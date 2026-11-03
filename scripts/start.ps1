@@ -9,7 +9,7 @@ elseif (Get-Command python -ErrorAction SilentlyContinue) { $Python = (Get-Comma
 elseif (Get-Command py -ErrorAction SilentlyContinue) { $Python = (Get-Command py).Source }
 
 if (-not $Python) {
-  $Bundled = "C:\Users\xinquan\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+  $Bundled = Join-Path $env:USERPROFILE ".dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
   if (Test-Path -LiteralPath $Bundled) { $Python = $Bundled }
 }
 

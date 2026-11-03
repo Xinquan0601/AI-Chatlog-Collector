@@ -16,6 +16,7 @@ from .parsers import (
     parse_dsh_jsonl,
     parse_generic_document,
     parse_generic_jsonl,
+    parse_vscode_copilot_jsonl,
 )
 from .utils import expand_path, iso_from_any, json_loads, shorten, safe_json, utc_now
 
@@ -120,6 +121,16 @@ def discover_sources(agent: dict[str, Any]) -> tuple[list[Source], list[str]]:
             for candidate in root.glob("opencode.db"):
                 add(candidate)
             continue
+        if key == "vscodecopilot":
+            # workspaceStorage/<hash>/chatSessions/<uuid>.jsonl plus the
+            # global emptyWindowChatSessions folder.
+            for candidate in root.glob("*.jsonl"):
+                add(candidate)
+            for candidate in root.glob("*/chatSessions/*.jsonl"):
+                add(candidate)
+            for candidate in root.glob("chatSessions/*.jsonl"):
+                add(candidate)
+            continue
         for pattern in patterns:
             try:
                 for candidate in root.rglob(pattern):
@@ -177,6 +188,10 @@ def parse_text(
         )
     if agent_key == "deepseekharness":
         return parse_dsh_jsonl(text.splitlines(), path, fallback_time, sid, start_sequence=start_sequence)
+    if agent_key == "vscodecopilot":
+        return parse_vscode_copilot_jsonl(
+            text.splitlines(), path, fallback_time, sid, start_sequence=start_sequence
+        )
     if source_type == "json":
         return parse_generic_document(
             text, path, fallback_time, sid, agent_key=agent_key, start_sequence=start_sequence
@@ -218,6 +233,17 @@ def collect_file_source(
 
     if source.source_type == "sqlite":
         raise RuntimeError("SQLite 来源必须由专用采集器处理")
+
+    if agent_key == "vscodecopilot":
+        # VS Code rewrites and compacts its chat log, so a byte offset is not a
+        # reliable cursor.  Session files are small; read the whole snapshot and
+        # let event fingerprints remove already archived events.
+        if cursor.get("size") == stat.st_size and cursor.get("mtime_ns") == stat.st_mtime_ns and cursor.get("done"):
+            return {"agent_key": agent_key, "source_path": source.path, "sessions": [], "events": [], "errors": []}, cursor
+        text = path.read_text(encoding="utf-8", errors="replace")
+        batch = parse_text(agent_key, text, source.path, fallback_time, source_type="jsonl")
+        next_cursor = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "done": True}
+        return batch, next_cursor
 
     # Uncompressed JSONL: read complete new lines from the byte offset.
     offset = int(cursor.get("offset") or 0)

@@ -138,7 +138,8 @@ function openConfig(agent) {
     '<div class="settings-form" style="margin-top:14px"><div class="field"><label class="field-label" for="agent-interval">同步间隔（分钟）</label><input class="input" id="agent-interval" type="number" min="1" max="1440" value="' + Number(config.interval_minutes || 30) + '"></div><div class="field"><label class="field-label" for="agent-attempts">失败重试次数</label><input class="input" id="agent-attempts" type="number" min="1" max="10" value="' + Number(config.max_attempts || 3) + '"></div></div>' +
     '<label class="field-label" for="agent-roots">数据源路径 <span style="color:var(--muted-2);font-weight:400">（每行一个，可为目录或文件）</span></label><textarea class="textarea" id="agent-roots" rows="4" spellcheck="false">' + esc((config.roots || []).join('\n')) + '</textarea>' +
     '<label class="field-label" for="agent-patterns">文件匹配模式 <span style="color:var(--muted-2);font-weight:400">（逗号或换行分隔）</span></label><input class="input" id="agent-patterns" value="' + attr((config.patterns || []).join(', ')) + '">' +
-    '<p class="field-help">采集器会对 JSONL 使用字节游标增量读取；压缩文件或 SQLite 使用时间游标，并以事件指纹做幂等去重。路径支持 ~ 与环境变量。</p>' +
+    '<p class="field-help">采集器会对 JSONL 使用字节游标增量读取；压缩文件或 SQLite 使用时间游标，并以事件指纹做幂等去重。</p>' +
+    '<p class="field-help">路径使用当前系统用户通配：' + '<code>~</code>' + ' 表示运行时的用户主目录（例如 Windows 的 ' + '<code>C:/Users/&lt;当前用户&gt;</code>' + '、Linux 的 ' + '<code>/home/&lt;当前用户&gt;</code>' + '），也支持 ' + '<code>%APPDATA%</code>' + ' / ' + '<code>$HOME</code>' + ' 等环境变量。保存时会把 ' + '<code>C:/Users/Administrator/...</code>' + ' 这类绝对路径自动改写为 ' + '<code>~/...</code>' + '，换账号或换机器后无需再改配置。</p>' +
     '</form>';
   const instance = showModal({
     title: '配置 ' + agent.name,

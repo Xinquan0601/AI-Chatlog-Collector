@@ -3,11 +3,12 @@ import {
 } from '../core.js';
 
 const ADAPTERS = [
-  { key: 'codex', name: 'Codex', source: '~/.codex/sessions/**/*.jsonl', format: 'rollout JSONL', mapping: 'response_item.message / function_call / output' },
+  { key: 'codex', name: 'Codex', source: '~/.codex/sessions/**/*.jsonl · archived_sessions', format: 'rollout JSONL', mapping: 'response_item.message / function_call / output' },
   { key: 'claudecode', name: 'Claude Code', source: '~/.claude/projects/**/*.jsonl', format: 'projects JSONL', mapping: 'message.content blocks · tool_use / tool_result' },
-  { key: 'opencode', name: 'OpenCode', source: '~/.local/share/opencode/opencode.db', format: 'SQLite (read-only)', mapping: 'session_v2 + session_message + content blocks' },
+  { key: 'opencode', name: 'OpenCode', source: '~/.local/share/opencode/opencode.db · opencode-linux', format: 'SQLite (read-only)', mapping: 'session_v2 + session_message + content blocks' },
   { key: 'workbuddy', name: 'WorkBuddy', source: '~/.workbuddy/projects/**/*.jsonl', format: 'CodeBuddy JSONL', mapping: 'message / user / assistant + tool blocks' },
   { key: 'deepseekharness', name: 'DeepSeek Harness', source: '~/.dsh/sessions/**/session.v4.jsonl.zstd', format: 'v4 event stream · zstd', mapping: 'user/message · assistant/message · tool/result' },
+  { key: 'vscodecopilot', name: 'VS Code Copilot', source: '%APPDATA%/Code/User/**/chatSessions/*.jsonl', format: 'chat session JSONL', mapping: 'kind 0/1/2/3 patch replay · requests[] · toolInvocationSerialized' },
   { key: 'zcode', name: 'ZCode', source: '~/.zcode/sessions/**/*.json(l)', format: 'generic JSON / JSONL', mapping: 'role/content · tool_calls · tool_use / tool_result' }
 ];
 

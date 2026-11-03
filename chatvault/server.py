@@ -80,6 +80,7 @@ from .db import (
 from .exporting import ExportTooLarge, create_export, estimate_export
 from .ingestion import reset_source
 from .jobs import get_job_manager, init_job_manager
+from .paths import normalize_roots, profile_dir, username
 from .utils import json_dumps, json_loads, utc_now
 
 
@@ -413,6 +414,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "agents": list_agents_with_stats(conn),
                 "event_types": EVENT_TYPES,
                 "version": VERSION,
+                "user": {"name": username(), "home": profile_dir(), "template": "~"},
             })
             return
         if path == "/api/agents" and method == "GET":
@@ -643,7 +645,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 roots = [line.strip() for line in roots.splitlines() if line.strip()]
             if not isinstance(roots, list) or any(not isinstance(item, str) for item in roots):
                 raise APIError(400, "bad_request", "roots 必须是字符串数组")
-            roots = [item.strip() for item in roots if item.strip()]
+            roots = normalize_roots([item.strip() for item in roots if item.strip()])
             if len(roots) > 20:
                 raise APIError(400, "bad_request", "最多配置 20 个数据源路径")
             config["roots"] = roots

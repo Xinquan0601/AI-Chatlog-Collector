@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -8,10 +9,12 @@ from typing import Any, Iterator
 
 from .constants import (
     AGENT_DEFINITIONS,
+    AGENT_MAP,
     DB_PATH,
     DEFAULT_AGENT_CONFIG,
     DEFAULT_SETTINGS,
 )
+from .paths import normalize_roots, username
 from .utils import default_roots_for, json_dumps, json_loads, utc_now
 
 
@@ -220,6 +223,51 @@ def connection(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection
         conn.close()
 
 
+PATH_MIGRATION_KEY = "paths_user_wildcard_v1"
+
+
+def migrate_agent_roots(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Convert stored collection roots to the current user's portable form.
+
+    Existing databases created by an earlier build (or on another workstation)
+    contain absolute paths such as "C:/Users/Administrator/.claude/projects".
+    They are rewritten to "~/.claude/projects" so the same archive keeps
+    working for the account that is running now.  The first run also appends
+    newly introduced default roots (for example Codex archived sessions).
+    """
+    applied = get_setting(conn, PATH_MIGRATION_KEY, None)
+    now = utc_now()
+    changed = 0
+    added: list[str] = []
+    for row in conn.execute("SELECT key, config_json FROM agents").fetchall():
+        config = json_loads(row["config_json"], {})
+        if not isinstance(config, dict):
+            continue
+        raw_roots = config.get("roots")
+        if not isinstance(raw_roots, list):
+            continue
+        original = [str(item) for item in raw_roots]
+        roots = normalize_roots(original)
+        if not applied:
+            definition = AGENT_MAP.get(row["key"])
+            if definition:
+                known = {os.path.normcase(item) for item in roots}
+                for default_root in default_roots_for(definition):
+                    if os.path.normcase(default_root) not in known:
+                        roots.append(default_root)
+                        added.append(f"{row['key']}:{default_root}")
+        if roots != original:
+            config["roots"] = roots
+            conn.execute(
+                "UPDATE agents SET config_json = ?, updated_at = ? WHERE key = ?",
+                (json_dumps(config), now, row["key"]),
+            )
+            changed += 1
+    if not applied:
+        set_setting(conn, PATH_MIGRATION_KEY, {"version": 1, "user": username(), "at": now})
+    return {"agents": changed, "added_roots": added, "user": username()}
+
+
 def init_db(db_path: str | Path | None = None) -> None:
     with connection(db_path) as conn:
         conn.executescript(SCHEMA)
@@ -246,6 +294,13 @@ def init_db(db_path: str | Path | None = None) -> None:
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)",
                 (key, json_dumps(value), now),
+            )
+        migration = migrate_agent_roots(conn)
+        if migration["agents"]:
+            log_system(
+                conn, "info", "paths",
+                f"采集路径已按当前用户 {migration['user']} 通配，更新 {migration['agents']} 个 Agent",
+                {"added_roots": migration["added_roots"]},
             )
 
 

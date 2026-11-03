@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from . import __version__
@@ -33,6 +34,24 @@ EVENT_TYPES = {
     "tool_result": {"label": "工具结果", "short": "TOOL RESULT", "color": "#6b4bd6"},
 }
 
+
+def vscode_user_dir() -> str:
+    """Return the VS Code user data directory as a portable template."""
+    if os.name == "nt":
+        return "%APPDATA%/Code/User"
+    if sys.platform == "darwin":
+        return "~/Library/Application Support/Code/User"
+    return "~/.config/Code/User"
+
+
+def vscode_copilot_roots() -> list[str]:
+    base = vscode_user_dir()
+    return [
+        base + "/workspaceStorage",
+        base + "/globalStorage/emptyWindowChatSessions",
+    ]
+
+
 AGENT_DEFINITIONS = [
     {
         "key": "codex",
@@ -42,7 +61,7 @@ AGENT_DEFINITIONS = [
         "color": "#0e7c66",
         "icon": "terminal",
         "adapter": "codex",
-        "default_roots": ["~/.codex/sessions"],
+        "default_roots": ["~/.codex/sessions", "~/.codex/archived_sessions"],
         "patterns": ["*.jsonl"],
         "format": "JSONL · rollout",
     },
@@ -66,7 +85,10 @@ AGENT_DEFINITIONS = [
         "color": "#4f46e5",
         "icon": "layers",
         "adapter": "opencode",
-        "default_roots": ["~/.local/share/opencode/opencode.db"],
+        "default_roots": [
+            "~/.local/share/opencode/opencode.db",
+            "~/.local/share/opencode-linux/opencode.db",
+        ],
         "patterns": ["opencode.db", "*.db"],
         "format": "SQLite · read-only",
     },
@@ -93,6 +115,18 @@ AGENT_DEFINITIONS = [
         "default_roots": ["~/.dsh/sessions"],
         "patterns": ["*.jsonl", "*.jsonl.zstd", "*.zst"],
         "format": "JSONL · zstd",
+    },
+    {
+        "key": "vscodecopilot",
+        "name": "VS Code Copilot",
+        "vendor": "Microsoft / GitHub",
+        "description": "读取 VS Code 工作区聊天会话（workspaceStorage 与 emptyWindowChatSessions），回放 JSONL 快照与增量记录。",
+        "color": "#0078d4",
+        "icon": "code",
+        "adapter": "copilot",
+        "default_roots": vscode_copilot_roots(),
+        "patterns": ["*.jsonl"],
+        "format": "JSONL · chat session",
     },
     {
         "key": "zcode",

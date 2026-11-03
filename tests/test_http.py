@@ -10,6 +10,7 @@ import urllib.request
 import http.cookiejar
 from pathlib import Path
 
+from chatvault.constants import AGENT_DEFINITIONS
 from chatvault.db import connection, init_db
 from chatvault.ingestion import import_batch
 from chatvault.jobs import get_job_manager
@@ -87,7 +88,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(payload["data"]["user"]["role"], "admin")
         status, payload = self.call(anonymous, "/api/bootstrap")
         self.assertEqual(status, 200)
-        self.assertEqual(len(payload["data"]["agents"]), 6)
+        self.assertEqual(len(payload["data"]["agents"]), len(AGENT_DEFINITIONS))
 
     def test_02_data_and_viewer_permissions(self):
         admin = self.opener()

@@ -15,7 +15,14 @@ from chatvault.auth import (
     ensure_default_admin,
     resolve_session,
 )
-from chatvault.db import connection, get_settings, init_db, list_agents
+from chatvault.db import (
+    PATH_MIGRATION_KEY,
+    connection,
+    get_settings,
+    init_db,
+    list_agents,
+    migrate_agent_roots,
+)
 from chatvault.exporting import create_export, estimate_export
 from chatvault.ingestion import import_batch, refresh_session_aggregates
 from chatvault.parsers import (
@@ -24,6 +31,14 @@ from chatvault.parsers import (
     parse_dsh_jsonl,
     parse_generic_document,
     parse_generic_jsonl,
+    parse_vscode_copilot_jsonl,
+)
+from chatvault.paths import (
+    describe_root,
+    expand_user_path,
+    normalize_roots,
+    to_user_template,
+    username,
 )
 from chatvault.utils import json_dumps
 
@@ -128,11 +143,175 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(result2["events"]), 2)
 
 
+class CopilotParserTests(unittest.TestCase):
+    def test_snapshot_patch_replay_and_four_types(self):
+        start = 1790000000000
+        snapshot = {
+            "version": 3,
+            "sessionId": "cop-1",
+            "creationDate": start,
+            "workingDirectory": "D:/demo/app",
+            "requests": [],
+        }
+        lines = [
+            json.dumps({"kind": 0, "v": snapshot}),
+            json.dumps({
+                "kind": 2,
+                "k": ["requests"],
+                "v": [{
+                    "requestId": "r1",
+                    "timestamp": start + 1000,
+                    "modelId": "gpt-5",
+                    "promptTokens": 120,
+                    "completionTokens": 30,
+                    "message": {"text": "帮我看看 main.py"},
+                    "response": [],
+                    "responseTimestamp": start + 2000,
+                }],
+            }),
+            json.dumps({
+                "kind": 2,
+                "k": ["requests", 0, "response"],
+                "v": [
+                    {"kind": "text", "value": "我先读取文件。"},
+                    {
+                        "kind": "toolInvocationSerialized",
+                        "toolId": "copilot_readFile",
+                        "toolCallId": "call-1",
+                        "invocationMessage": {"value": "读取 main.py"},
+                        "resultDetails": {"value": "print('hi')"},
+                        "isComplete": True,
+                        "startedAt": start + 2100,
+                        "completedAt": start + 2200,
+                    },
+                ],
+            }),
+            json.dumps({"kind": 1, "k": ["customTitle"], "v": "Copilot 会话"}),
+        ]
+        result = parse_vscode_copilot_jsonl(lines, "cop-1.jsonl", "2026-11-03T00:00:00Z", "cop-1")
+        self.assertEqual(len(result["sessions"]), 1)
+        session = result["sessions"][0]
+        self.assertEqual(session["external_id"], "cop-1")
+        self.assertEqual(session["title"], "Copilot 会话")
+        self.assertEqual(session["project"], "app")
+        self.assertEqual(session["model"], "gpt-5")
+        self.assertEqual(session["tokens_input"], 120)
+        self.assertEqual(session["tokens_output"], 30)
+        counts = {}
+        for event in result["events"]:
+            counts[event["type"]] = counts.get(event["type"], 0) + 1
+        self.assertEqual(counts, {
+            "user_message": 1,
+            "assistant_message": 1,
+            "tool_call": 1,
+            "tool_result": 1,
+        })
+        tool_call = next(event for event in result["events"] if event["type"] == "tool_call")
+        tool_result = next(event for event in result["events"] if event["type"] == "tool_result")
+        self.assertEqual(tool_call["tool_call_id"], "call-1")
+        self.assertEqual(tool_result["tool_call_id"], "call-1")
+        self.assertIn("读取 main.py", tool_call["tool_input_json"])
+        self.assertIn("print", tool_result["content"])
+        self.assertEqual(result["errors"], [])
+
+    def test_empty_and_malformed_logs(self):
+        result = parse_vscode_copilot_jsonl([json.dumps({"kind": 0, "v": {"requests": []}})], "empty.jsonl", None, "empty")
+        self.assertEqual(result["events"], [])
+        self.assertEqual(result["sessions"], [])
+        broken = parse_vscode_copilot_jsonl(["{not json"], "broken.jsonl", None, "broken")
+        self.assertTrue(broken["errors"])
+        self.assertEqual(broken["sessions"], [])
+
+
+class PathTemplateTests(unittest.TestCase):
+    def test_windows_and_posix_homes_become_user_template(self):
+        home = Path("C:/Users/xinquan")
+        self.assertEqual(
+            to_user_template("C:/Users/Administrator/.claude/projects", home=home),
+            "~/.claude/projects",
+        )
+        self.assertEqual(
+            to_user_template("C:" + chr(92) + "Users" + chr(92) + "Administrator" + chr(92) + "Desktop" + chr(92) + "prj", home=home),
+            "~/Desktop/prj",
+        )
+        self.assertEqual(to_user_template("C:/Users/xinquan", home=home), "~")
+        self.assertEqual(
+            to_user_template("/home/administrator/.codex/sessions", home=Path("/home/xinquan")),
+            "~/.codex/sessions",
+        )
+        self.assertEqual(
+            to_user_template("/Users/Administrator/Library/Application Support", home=Path("/Users/xinquan")),
+            "~/Library/Application Support",
+        )
+
+    def test_non_user_paths_and_reserved_dirs_are_preserved(self):
+        home = Path("C:/Users/xinquan")
+        self.assertEqual(to_user_template("C:/Users/Public/Documents", home=home), "C:/Users/Public/Documents")
+        self.assertEqual(to_user_template("D:/data/agenttrail", home=home), "D:/data/agenttrail")
+        self.assertEqual(to_user_template("~/.zcode/sessions", home=home), "~/.zcode/sessions")
+        self.assertEqual(to_user_template("", home=home), "")
+
+    def test_environment_variables_expand_before_templating(self):
+        import os
+        old = os.environ.get("APPDATA")
+        os.environ["APPDATA"] = "C:/Users/xinquan/AppData/Roaming"
+        try:
+            self.assertEqual(
+                to_user_template("%APPDATA%/Code/User/workspaceStorage", home=Path("C:/Users/xinquan")),
+                "~/AppData/Roaming/Code/User/workspaceStorage",
+            )
+        finally:
+            if old is None:
+                os.environ.pop("APPDATA", None)
+            else:
+                os.environ["APPDATA"] = old
+
+    def test_normalize_roots_deduplicates_and_expands(self):
+        roots = normalize_roots([
+            "C:/Users/Administrator/.codex/sessions",
+            "~/.codex/sessions",
+            "~/.codex/sessions/",
+            "",
+            "  ",
+        ], home=Path("C:/Users/xinquan"))
+        self.assertEqual(roots, ["~/.codex/sessions"])
+        resolved = expand_user_path("~/.codex/sessions", home=Path("C:/Users/xinquan"))
+        self.assertEqual(Path(resolved), Path("C:/Users/xinquan/.codex/sessions"))
+        info = describe_root("C:/Users/Administrator/.claude/projects", home=Path("C:/Users/xinquan"))
+        self.assertEqual(info["template"], "~/.claude/projects")
+        self.assertEqual(Path(info["resolved"]), Path("C:/Users/xinquan/.claude/projects"))
+
+    def test_username_is_available(self):
+        self.assertTrue(username())
+
+
 class StorageTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp.name) / "test.db"
         init_db(self.db_path)
+
+    def test_legacy_absolute_roots_are_migrated(self):
+        with connection(self.db_path) as conn:
+            row = conn.execute("SELECT config_json FROM agents WHERE key = 'codex'").fetchone()
+            config = json.loads(row["config_json"])
+            config["roots"] = ["C:/Users/Administrator/.codex/sessions"]
+            conn.execute(
+                "UPDATE agents SET config_json = ? WHERE key = 'codex'",
+                (json.dumps(config),),
+            )
+            conn.execute("DELETE FROM settings WHERE key = ?", (PATH_MIGRATION_KEY,))
+            conn.commit()
+            result = migrate_agent_roots(conn)
+            conn.commit()
+            self.assertGreaterEqual(result["agents"], 1)
+            migrated = conn.execute("SELECT config_json FROM agents WHERE key = 'codex'").fetchone()
+            roots = json.loads(migrated["config_json"])["roots"]
+            self.assertIn("~/.codex/sessions", roots)
+            self.assertIn("~/.codex/archived_sessions", roots)
+            self.assertNotIn("C:/Users/Administrator/.codex/sessions", roots)
+            stored = conn.execute("SELECT 1 FROM settings WHERE key = ?", (PATH_MIGRATION_KEY,)).fetchone()
+            self.assertIsNotNone(stored)
 
     def tearDown(self):
         self.temp.cleanup()

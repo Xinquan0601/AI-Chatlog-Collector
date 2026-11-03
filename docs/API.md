@@ -91,6 +91,8 @@ Body 可包含：
 }
 ```
 
+`roots` 中的路径会先按当前系统用户归一化：`C:/Users/Administrator/.claude/projects`、`/home/administrator/.codex/sessions` 都会保存为 `~/.claude/projects`、`~/.codex/sessions`；也支持 `%APPDATA%`、`$HOME` 等环境变量。
+
 ### POST /api/agents/{key}/sync  （管理员）
 
 排队采集。返回 `202` 与 `job_id`。若该 Agent 已有任务，返回已有任务并附 `notice`。

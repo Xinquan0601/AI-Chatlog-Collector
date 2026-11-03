@@ -76,7 +76,7 @@ DEMO = [
     {
         "agent": "opencode", "external": "ses_demo_opencode_001",
         "title": "配置多 Provider 与模型路由",
-        "project": "opencode-provider", "cwd": "C:/Users/xinquan/Documents/Default Project",
+        "project": "opencode-provider", "cwd": str(Path.home() / "Documents" / "Default Project"),
         "model": "mimo-v2.6-flash-free", "days": 1, "hours": 4,
         "events": [
             ("user", "为 OpenCode 配置新的 Provider 与模型路由，要求保留默认模型回退，并验证工具调用是否正常。", {}),
@@ -90,7 +90,7 @@ DEMO = [
     {
         "agent": "opencode", "external": "ses_demo_opencode_002",
         "title": "临时文件清理与工作区检查",
-        "project": "workspace-maintenance", "cwd": "C:/Users/xinquan/AppData/Local/Temp",
+        "project": "workspace-maintenance", "cwd": str(Path.home() / "AppData" / "Local" / "Temp"),
         "model": "deepseek-v4.1-flash", "days": 8, "hours": 2,
         "events": [
             ("user", "只回答一个词：OK。不要改任何文件。", {}),
