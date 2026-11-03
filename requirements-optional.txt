@@ -1,0 +1,3 @@
+# AgentTrail 仅使用 Python 标准库运行。
+# 可选依赖：DeepSeek Harness 会话为 .jsonl.zstd 压缩格式时用于解压。
+zstandard>=0.22
