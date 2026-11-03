@@ -174,19 +174,26 @@ def list_session_events(
         params.extend([needle, needle, needle])
     where_sql = " AND ".join(where)
     total = conn.execute(f"SELECT COUNT(*) FROM events WHERE {where_sql}", params).fetchone()[0]
+    # Only the preview slice travels out of SQLite: raw_json / metadata_json are
+    # never part of the timeline payload, and a 60 KB message would otherwise be
+    # copied in full just to be cut in Python.
     rows = conn.execute(
-        f"""SELECT * FROM events WHERE {where_sql}
+        f"""SELECT id, session_id, type, source_event_id, sequence, timestamp,
+                   substr(content, 1, ?) AS content, length(content) AS content_length,
+                   tool_name, tool_call_id, tool_status, tool_input_json, model,
+                   tokens_input, tokens_output, metadata_json, created_at
+            FROM events WHERE {where_sql}
             ORDER BY COALESCE(timestamp, created_at), sequence, id
             LIMIT ? OFFSET ?""",
-        (*params, page_size, (page - 1) * page_size),
+        (preview_chars, *params, page_size, (page - 1) * page_size),
     ).fetchall()
     items = []
     for row in rows:
         item = dict(row)
-        content = item.get("content") or ""
-        item["content_length"] = len(content)
-        item["truncated"] = len(content) > preview_chars
-        item["content"] = content[:preview_chars]
+        if item.get("content") is None:
+            item["content"] = ""
+        item["content_length"] = int(item.pop("content_length") or 0)
+        item["truncated"] = item["content_length"] > preview_chars
         tool_input = json_loads(item.get("tool_input_json"), None)
         item["tool_input"] = tool_input if isinstance(tool_input, (dict, list)) else (item.get("tool_input_json") or None)
         if isinstance(item["tool_input"], str) and len(item["tool_input"]) > 4000:
@@ -216,30 +223,63 @@ def get_event(conn: sqlite3.Connection, event_id: int) -> dict[str, Any] | None:
     return item
 
 
-def type_counts(conn: sqlite3.Connection, session_id: int | None = None) -> dict[str, int]:
-    sql = "SELECT type, COUNT(*) AS count FROM events"
-    params: list[Any] = []
-    if session_id:
-        sql += " WHERE session_id = ?"
-        params.append(session_id)
-    sql += " GROUP BY type"
+def _type_summary(conn: sqlite3.Connection) -> tuple[dict[str, int], int]:
+    """Type histogram + tool-result success count, both served by covering indexes."""
     counts = {key: 0 for key in EVENT_TYPES}
-    for row in conn.execute(sql, params):
+    for row in conn.execute("SELECT type, COUNT(*) AS count FROM events GROUP BY type"):
+        counts[row["type"]] = row["count"]
+    success = 0
+    for row in conn.execute(
+        "SELECT tool_status, COUNT(*) AS count FROM events WHERE type='tool_result' GROUP BY tool_status"
+    ):
+        if row["tool_status"] in ("success", "completed"):
+            success += int(row["count"] or 0)
+    return counts, success
+
+
+def type_counts(conn: sqlite3.Connection, session_id: int | None = None) -> dict[str, int]:
+    if not session_id:
+        return _type_summary(conn)[0]
+    counts = {key: 0 for key in EVENT_TYPES}
+    for row in conn.execute(
+        "SELECT type, COUNT(*) AS count FROM events WHERE session_id = ? GROUP BY type", (session_id,)
+    ):
         counts[row["type"]] = row["count"]
     return counts
 
 
 def list_agents_with_stats(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    # Three grouped joins instead of eight correlated sub-queries per agent:
+    # the aggregates are computed once for the whole archive and the paid cost
+    # no longer multiplies with the number of adapters.
     rows = conn.execute(
         """SELECT a.*,
-             (SELECT COUNT(*) FROM sessions s WHERE s.agent_key = a.key) AS session_count,
-             (SELECT COUNT(*) FROM events e WHERE e.agent_key = a.key) AS event_count,
-             (SELECT COUNT(*) FROM events e WHERE e.agent_key = a.key AND e.type='tool_call') AS tool_count,
-             (SELECT COALESCE(SUM(e.tokens_input+e.tokens_output),0) FROM events e WHERE e.agent_key = a.key) AS event_tokens,
-             (SELECT COUNT(*) FROM sources src WHERE src.agent_key = a.key) AS source_count,
-             (SELECT COUNT(*) FROM sources src WHERE src.agent_key = a.key AND src.status='error') AS source_errors,
-             (SELECT MAX(e.timestamp) FROM events e WHERE e.agent_key = a.key) AS last_event_at
-           FROM agents a ORDER BY a.rowid"""
+             COALESCE(ses.session_count, 0) AS session_count,
+             COALESCE(ev.event_count, 0) AS event_count,
+             COALESCE(ev.tool_count, 0) AS tool_count,
+             COALESCE(ev.event_tokens, 0) AS event_tokens,
+             COALESCE(src.source_count, 0) AS source_count,
+             COALESCE(src.source_errors, 0) AS source_errors,
+             ev.last_event_at AS last_event_at
+           FROM agents a
+           LEFT JOIN (
+               SELECT agent_key, COUNT(*) AS session_count FROM sessions GROUP BY agent_key
+           ) ses ON ses.agent_key = a.key
+           LEFT JOIN (
+               SELECT agent_key,
+                      COUNT(*) AS event_count,
+                      SUM(CASE WHEN type = 'tool_call' THEN 1 ELSE 0 END) AS tool_count,
+                      SUM(tokens_input + tokens_output) AS event_tokens,
+                      MAX(timestamp) AS last_event_at
+               FROM events GROUP BY agent_key
+           ) ev ON ev.agent_key = a.key
+           LEFT JOIN (
+               SELECT agent_key,
+                      COUNT(*) AS source_count,
+                      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS source_errors
+               FROM sources GROUP BY agent_key
+           ) src ON src.agent_key = a.key
+           ORDER BY a.rowid"""
     ).fetchall()
     result = []
     for row in rows:
@@ -259,9 +299,11 @@ def list_agents_with_stats(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 def overview(conn: sqlite3.Connection, days: int = 14) -> dict[str, Any]:
     agents = list_agents_with_stats(conn)
-    total_sessions = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-    total_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-    counts = type_counts(conn)
+    # The per-agent roll-up already visited every row, so the archive totals are
+    # summed from it instead of scanning sessions and events again.
+    total_sessions = sum(int(agent["session_count"] or 0) for agent in agents)
+    total_events = sum(int(agent["event_count"] or 0) for agent in agents)
+    counts, result_ok = _type_summary(conn)
     now = datetime.now(timezone.utc)
     start_24h = _utc_iso(now - timedelta(hours=24))
     start_7d = _utc_iso(now - timedelta(days=7))
@@ -318,14 +360,8 @@ def overview(conn: sqlite3.Connection, days: int = 14) -> dict[str, Any]:
         "SELECT COALESCE(SUM(size_bytes),0) FROM backups WHERE status='ready'"
     ).fetchone()[0]
     backup_size = int(backup_total or 0)
-    result_totals = conn.execute(
-        """SELECT COUNT(*) AS total,
-                  SUM(CASE WHEN tool_status IN ('success','completed') THEN 1 ELSE 0 END) AS success
-           FROM events WHERE type='tool_result'"""
-    ).fetchone()
-    success_rate = None
-    if result_totals and result_totals["total"]:
-        success_rate = round((result_totals["success"] or 0) * 100 / result_totals["total"], 1)
+    result_total = int(counts.get("tool_result") or 0)
+    success_rate = round(result_ok * 100 / result_total, 1) if result_total else None
 
     return {
         "totals": {
@@ -375,20 +411,15 @@ def analytics(
                    SUM(CASE WHEN e.type='tool_result' THEN 1 ELSE 0 END) AS tool_results,
                    COALESCE(SUM(e.tokens_input),0) AS tokens_input,
                    COALESCE(SUM(e.tokens_output),0) AS tokens_output,
-                   COUNT(DISTINCT e.session_id) AS sessions
+                   COUNT(DISTINCT e.session_id) AS sessions,
+                   SUM(CASE WHEN e.type='tool_result' AND e.tool_status IN ('success','completed') THEN 1 ELSE 0 END) AS tool_ok,
+                   SUM(CASE WHEN e.type='tool_result' AND e.tool_status IN ('error','failed') THEN 1 ELSE 0 END) AS tool_failed
             FROM events e WHERE {where_sql}""",
-        params,
-    ).fetchone()
-    success = conn.execute(
-        f"""SELECT COUNT(*) AS total,
-                   SUM(CASE WHEN tool_status IN ('success','completed') THEN 1 ELSE 0 END) AS ok,
-                   SUM(CASE WHEN tool_status IN ('error','failed') THEN 1 ELSE 0 END) AS failed
-            FROM events e WHERE {where_sql} AND e.type='tool_result'""",
         params,
     ).fetchone()
     total_events = int(summary["events"] or 0)
     tool_results = int(summary["tool_results"] or 0)
-    success_rate = round((success["ok"] or 0) * 100 / tool_results, 1) if tool_results else None
+    success_rate = round((summary["tool_ok"] or 0) * 100 / tool_results, 1) if tool_results else None
 
     start_dt = parse_bound(start) or (datetime.now(timezone.utc) - timedelta(days=max(1, days) - 1))
     end_dt = parse_bound(end) or datetime.now(timezone.utc)
@@ -466,7 +497,7 @@ def analytics(
             "tokens_input": int(summary["tokens_input"] or 0),
             "tokens_output": int(summary["tokens_output"] or 0),
             "tool_success_rate": success_rate,
-            "tool_failures": int(success["failed"] or 0),
+            "tool_failures": int(summary["tool_failed"] or 0),
             "avg_events_per_session": round(total_events / summary["sessions"], 1) if summary["sessions"] else 0,
         },
         "type_counts": {

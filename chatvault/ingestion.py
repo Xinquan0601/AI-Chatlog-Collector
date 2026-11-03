@@ -140,8 +140,28 @@ def event_fingerprint(agent_key: str, external_session_id: str, event: dict[str,
     return sha256_text(base)
 
 
-def _existing_event(conn: sqlite3.Connection, fingerprint: str) -> sqlite3.Row | None:
-    return conn.execute("SELECT * FROM events WHERE fingerprint = ?", (fingerprint,)).fetchone()
+_FINGERPRINT_CHUNK = 400
+
+
+def _prefetch_events(conn: sqlite3.Connection, fingerprints: list[str]) -> dict[str, dict[str, Any]]:
+    """Resolve a whole batch of fingerprints with a few IN queries.
+
+    Re-reading one row per event dominated the sync time on large sources, and
+    every lookup pulled the full payload (including raw_json) just to compare a
+    few columns. Chunked lookups keep each statement under SQLite's parameter
+    limit and only fetch the fields the merge decision needs.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(fingerprints), _FINGERPRINT_CHUNK):
+        chunk = fingerprints[start:start + _FINGERPRINT_CHUNK]
+        placeholders = ",".join("?" * len(chunk))
+        for row in conn.execute(
+            f"""SELECT id, fingerprint, content, tool_status, tool_input_json
+                FROM events WHERE fingerprint IN ({placeholders})""",
+            chunk,
+        ):
+            found[row["fingerprint"]] = dict(row)
+    return found
 
 
 def import_batch(conn: sqlite3.Connection, agent_key: str, batch: dict[str, Any]) -> dict[str, int]:
@@ -152,8 +172,8 @@ def import_batch(conn: sqlite3.Connection, agent_key: str, batch: dict[str, Any]
         sessions_by_external[session["external_id"]] = session_id
         stats["sessions"] += 1
 
+    prepared: list[tuple[dict[str, Any], int, str]] = []
     for event in batch.get("events", []):
-        stats["events_seen"] += 1
         external_sid = event["session_external_id"]
         session_id = sessions_by_external.get(external_sid)
         if session_id is None:
@@ -165,8 +185,13 @@ def import_batch(conn: sqlite3.Connection, agent_key: str, batch: dict[str, Any]
                 "ended_at": event.get("timestamp"),
             })
             sessions_by_external[external_sid] = session_id
-        fingerprint = event_fingerprint(agent_key, external_sid, event)
-        existing = _existing_event(conn, fingerprint)
+        prepared.append((event, session_id, event_fingerprint(agent_key, external_sid, event)))
+
+    existing_map = _prefetch_events(conn, [fingerprint for _, _, fingerprint in prepared])
+
+    for event, session_id, fingerprint in prepared:
+        stats["events_seen"] += 1
+        existing = existing_map.get(fingerprint)
         content = event.get("content") or ""
         if existing:
             stats["duplicates"] += 1
@@ -189,10 +214,13 @@ def import_batch(conn: sqlite3.Connection, agent_key: str, batch: dict[str, Any]
                        WHERE id = ?""",
                     (next_content, next_status, next_input, event.get("raw_json"), existing["id"]),
                 )
+                existing["content"] = next_content
+                existing["tool_status"] = next_status or existing["tool_status"]
+                existing["tool_input_json"] = next_input or existing["tool_input_json"]
                 stats["events_updated"] += 1
             continue
         try:
-            conn.execute(
+            cursor = conn.execute(
                 """INSERT INTO events
                 (agent_key, session_id, type, source_event_id, sequence, timestamp, content,
                  tool_name, tool_call_id, tool_status, tool_input_json, model, tokens_input,
@@ -207,6 +235,14 @@ def import_batch(conn: sqlite3.Connection, agent_key: str, batch: dict[str, Any]
                     event.get("metadata_json"), event.get("raw_json"), fingerprint, utc_now(),
                 ),
             )
+            # Keep the map current so a second occurrence in the same batch is
+            # merged against the row we just wrote, exactly like a re-read.
+            existing_map[fingerprint] = {
+                "id": cursor.lastrowid,
+                "content": content,
+                "tool_status": event.get("tool_status"),
+                "tool_input_json": event.get("tool_input_json"),
+            }
             stats["events_inserted"] += 1
         except sqlite3.IntegrityError:
             stats["duplicates"] += 1
@@ -413,6 +449,9 @@ def sync_agent(
             f"{agent['name']} 同步完成",
             {key: stats[key] for key in ("sources_total", "sources_ok", "sources_failed", "sessions", "events_inserted", "duplicates")},
         )
+        # Bulk inserts skew the planner statistics; refresh them when they are
+        # stale instead of paying for a full ANALYZE on every sync.
+        conn.execute("PRAGMA optimize")
         conn.commit()
         stats["status"] = status
         if progress:

@@ -222,7 +222,11 @@ erDiagram
 | fingerprint | UNIQUE，幂等键 |
 | raw_json | 原始记录（最大约 500KB） |
 
-索引：`(session_id, timestamp, sequence, id)`、`(agent_key, timestamp)`、`(type, timestamp)`、`tool_name`、`tool_call_id`。
+索引：`(session_id, timestamp, sequence, id)`、`(agent_key, timestamp)`、`(type, timestamp)`、`tool_name`、`tool_call_id`；
+聚合专用的覆盖索引 `(agent_key, type, timestamp, tokens_input, tokens_output, session_id)`、`(timestamp, agent_key, type)`、
+`(type, tool_status, session_id, tokens_input, tokens_output)`，以及只覆盖工具行的部分索引
+`(tool_name, tool_status) WHERE type='tool_call'`、`(tool_status) WHERE type='tool_result'`。
+覆盖索引让总览/统计的聚合停在索引页，部分索引让工具统计只扫工具行。
 
 ### 4.5 sources
 
@@ -529,6 +533,15 @@ Agent 卡片 → 配置 → 编辑 roots / patterns / 调度 / 重试
 - 会话详情：事件分页，正文默认截断到 12,000 字符；完整内容单独接口。
 - 搜索：SQL `LIKE` + 关键索引；中文子串可靠。大规模可迁移 FTS5。
 - 统计：会话级 Token 与计数已聚合；事件趋势按天分组。
+- 聚合查询：总览 KPI、按 Agent 汇总、工具排行、区间统计全部由覆盖索引直接读出，不再回表；
+  工具成功率与类型直方图合并为两次索引扫描。
+- 查询计划：`init_db` 在索引版本变化时执行一次 `ANALYZE`（版本号存于 `settings.db_stats_version`），
+  采集结束调用 `PRAGMA optimize` 增量刷新统计；否则规划器会挑较小的 `(type, timestamp)` 索引并回表，
+  聚合耗时相差一个数量级。
+- 采集写入：整批事件用 `IN` 分块预取 fingerprint 与合并所需列，避免逐条 `SELECT *` 把 `raw_json`
+  拖进内存；12 万事件档案上单批 2,000 条新增约 60 ms，重复同步约 20 ms。
+- 连接：WAL 只在建库时设置，其余为 `synchronous=NORMAL`、32 MB cache、`temp_store=MEMORY`、256 MB mmap，
+  单次连接开销约 1 ms。
 - 导出：临时文件流式发送；限制 200,000 行，防止内存爆炸。
 - SQLite WAL 支持读写并发；长任务使用短事务分批提交。
 - 大量源文件单次发现上限 5,000；单个文件上限 1,024MB（可配置）。

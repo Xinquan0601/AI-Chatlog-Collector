@@ -99,6 +99,18 @@ CREATE INDEX IF NOT EXISTS idx_events_agent_time ON events(agent_key, timestamp)
 CREATE INDEX IF NOT EXISTS idx_events_type_time ON events(type, timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_tool ON events(tool_name);
 CREATE INDEX IF NOT EXISTS idx_events_call ON events(tool_call_id);
+-- Aggregates that used to walk the table for every agent now read a covering
+-- index instead: (agent_key, type) plus the token/session columns keeps the
+-- per-agent roll-ups inside the index, and the time-first index serves the
+-- daily trend buckets without a temporary b-tree.
+CREATE INDEX IF NOT EXISTS idx_events_agent_rollup ON events(agent_key, type, timestamp, tokens_input, tokens_output, session_id);
+CREATE INDEX IF NOT EXISTS idx_events_time_agent_type ON events(timestamp, agent_key, type);
+-- Whole-archive totals (analytics "all time", overview KPIs) scan every row;
+-- this covering index keeps that scan off the table pages.
+CREATE INDEX IF NOT EXISTS idx_events_scan ON events(type, tool_status, session_id, tokens_input, tokens_output);
+-- Tool call/result statistics are computed from the tool rows only.
+CREATE INDEX IF NOT EXISTS idx_events_tool_call ON events(tool_name, tool_status) WHERE type = 'tool_call';
+CREATE INDEX IF NOT EXISTS idx_events_tool_result ON events(tool_status) WHERE type = 'tool_result';
 
 CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,10 +243,17 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=15)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    # journal_mode is persistent, so it is only set when the file is created;
+    # the rest tune the read path for a 100k+ event archive.
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    if str(mode).lower() != "wal":
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=15000")
+    conn.execute("PRAGMA cache_size=-32768")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA mmap_size=268435456")
     return conn
 
 
@@ -296,6 +315,30 @@ def migrate_agent_roots(conn: sqlite3.Connection) -> dict[str, Any]:
     return {"agents": changed, "added_roots": added, "user": username()}
 
 
+STATS_VERSION_KEY = "db_stats_version"
+STATS_VERSION = 2
+
+
+def _refresh_planner_stats(conn: sqlite3.Connection) -> None:
+    """Analyse the archive once after a schema upgrade changed the indexes.
+
+    Without statistics SQLite keeps choosing the small (type, timestamp) index
+    for grouped scans and falls back to row lookups for the wide covering
+    indexes, which costs an order of magnitude on overview/analytics queries.
+    Index definitions also only take effect here: CREATE INDEX IF NOT EXISTS
+    keeps whatever columns an older build created, so a bumped version drops
+    and rebuilds the roll-up index before analysing.
+    """
+    version = int(get_setting(conn, STATS_VERSION_KEY, 0) or 0)
+    if version == STATS_VERSION:
+        return
+    if version < 2:
+        conn.executescript("DROP INDEX IF EXISTS idx_events_agent_rollup;")
+        conn.executescript(SCHEMA)
+    conn.executescript("ANALYZE;")
+    set_setting(conn, STATS_VERSION_KEY, STATS_VERSION)
+
+
 def init_db(db_path: str | Path | None = None) -> None:
     with connection(db_path) as conn:
         conn.executescript(SCHEMA)
@@ -323,6 +366,7 @@ def init_db(db_path: str | Path | None = None) -> None:
                 "INSERT OR IGNORE INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)",
                 (key, json_dumps(value), now),
             )
+        _refresh_planner_stats(conn)
         migration = migrate_agent_roots(conn)
         if migration["agents"]:
             log_system(
