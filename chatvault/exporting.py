@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .analytics import _agent_condition, _append_range, _escape_like
+from .analytics import _agent_condition, _append_range, _escape_like, agent_keys, resolve_time_range
 from .constants import EVENT_TYPES
 from .utils import utc_now
 
@@ -19,7 +19,7 @@ class ExportTooLarge(RuntimeError):
 
 
 def _export_where(
-    agent: str | None,
+    agents: list[str] | None,
     start: str | None,
     end: str | None,
     event_types: list[str] | None,
@@ -29,7 +29,7 @@ def _export_where(
 ) -> tuple[str, list[Any]]:
     where = ["1=1"]
     params: list[Any] = []
-    _agent_condition(where, params, agent, alias="e")
+    _agent_condition(where, params, agents, alias="e")
     _append_range(where, params, "e", start, end)
     types = [item for item in (event_types or []) if item in EVENT_TYPES]
     if types:
@@ -190,6 +190,7 @@ def estimate_export(
     conn: sqlite3.Connection,
     *,
     agent: str | None = None,
+    agents: list[str] | None = None,
     start: str | None = None,
     end: str | None = None,
     event_types: list[str] | None = None,
@@ -198,7 +199,11 @@ def estimate_export(
     project: str | None = None,
 ) -> dict[str, Any]:
     """Count what a matching export would contain, without materializing it."""
-    where_sql, params = _export_where(agent, start, end, event_types, q, session_id, project)
+    # Normalize caller-supplied bounds (ISO strings of any precision) so the
+    # closed-interval comparison always uses the canonical millisecond format.
+    start, end = resolve_time_range(None, start, end)
+    keys = agent_keys(agents if agents is not None else agent)
+    where_sql, params = _export_where(keys, start, end, event_types, q, session_id, project)
     rows = conn.execute(
         f"""SELECT e.type AS type, COUNT(*) AS total,
                    COALESCE(SUM(LENGTH(CAST(e.content AS BLOB))), 0) AS bytes,
@@ -218,11 +223,31 @@ def estimate_export(
         f"SELECT COUNT(DISTINCT e.session_id) FROM events e JOIN sessions s ON s.id=e.session_id WHERE {where_sql}",
         params,
     ).fetchone()[0]
+    # Per-agent breakdown deliberately ignores the agent selection: every agent card should be
+    # able to show how many events the *other* filters would match if that agent were picked.
+    agent_where_sql, agent_params = _export_where([], start, end, event_types, q, session_id, project)
+    by_agent = [
+        {
+            "agent_key": row["agent_key"],
+            "events": int(row["events"] or 0),
+            "sessions": int(row["sessions"] or 0),
+        }
+        for row in conn.execute(
+            f"""SELECT e.agent_key, COUNT(*) AS events, COUNT(DISTINCT e.session_id) AS sessions
+                FROM events e JOIN sessions s ON s.id=e.session_id
+                WHERE {agent_where_sql}
+                GROUP BY e.agent_key
+                ORDER BY events DESC, e.agent_key""",
+            agent_params,
+        )
+    ]
     return {
         "total": sum(by_type.values()),
         "by_type": by_type,
         "sessions": int(session_total or 0),
         "bytes": bytes_total,
+        "agents": keys,
+        "by_agent": by_agent,
     }
 
 
@@ -231,6 +256,7 @@ def create_export(
     *,
     format: str = "csv",
     agent: str | None = None,
+    agents: list[str] | None = None,
     start: str | None = None,
     end: str | None = None,
     event_types: list[str] | None = None,
@@ -240,7 +266,9 @@ def create_export(
     max_rows: int = 200_000,
     requested_by: str | None = None,
 ) -> dict[str, Any]:
-    where_sql, params = _export_where(agent, start, end, event_types, q, session_id, project)
+    start, end = resolve_time_range(None, start, end)
+    keys = agent_keys(agents if agents is not None else agent)
+    where_sql, params = _export_where(keys, start, end, event_types, q, session_id, project)
     total = conn.execute(
         f"SELECT COUNT(*) FROM events e JOIN sessions s ON s.id=e.session_id WHERE {where_sql}", params
     ).fetchone()[0]
@@ -265,7 +293,8 @@ def create_export(
         "requested_by": requested_by,
         "format": format,
         "filters": {
-            "agent": agent, "from": start, "to": end,
+            "agents": keys, "agent": keys[0] if len(keys) == 1 else None,
+            "from": start, "to": end,
             "event_types": event_types or [], "q": q, "session_id": session_id, "project": project,
         },
         "counts": {"events": total, "sessions": session_total},

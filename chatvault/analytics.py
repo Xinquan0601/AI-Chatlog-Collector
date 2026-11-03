@@ -62,10 +62,38 @@ def _escape_like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _agent_condition(where: list[str], params: list[Any], agent: str | None, alias: str = "s") -> None:
-    if agent and agent != "all":
+def agent_keys(value: str | list[str] | tuple[str, ...] | None) -> list[str]:
+    """Normalize "all" / a single key / a list of keys into an explicit agent filter.
+
+    An empty result means "no agent restriction". "all" is treated as no restriction so
+    existing single-agent callers keep working unchanged.
+    """
+    if not value:
+        return []
+    items = [value] if isinstance(value, str) else list(value)
+    keys: list[str] = []
+    for item in items:
+        text = str(item).strip() if item is not None else ""
+        if text and text != "all" and text not in keys:
+            keys.append(text)
+    return keys
+
+
+def _agent_condition(
+    where: list[str],
+    params: list[Any],
+    agent: str | list[str] | tuple[str, ...] | None,
+    alias: str = "s",
+) -> None:
+    keys = agent_keys(agent)
+    if not keys:
+        return
+    if len(keys) == 1:
         where.append(f"{alias}.agent_key = ?")
-        params.append(agent)
+        params.append(keys[0])
+        return
+    where.append(f"{alias}.agent_key IN ({','.join('?' for _ in keys)})")
+    params.extend(keys)
 
 
 def _session_where(

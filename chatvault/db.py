@@ -315,6 +315,30 @@ def migrate_agent_roots(conn: sqlite3.Connection) -> dict[str, Any]:
     return {"agents": changed, "added_roots": added, "user": username()}
 
 
+TIMESTAMP_FORMAT_KEY = "events_timestamp_ms_v1"
+
+
+def normalize_event_timestamps(conn: sqlite3.Connection) -> int:
+    """Rewrite legacy event timestamps to UTC with millisecond precision.
+
+    Export filters compare ISO strings lexicographically, so rows stored as
+    "...:00Z" (seconds) and bounds normalized to "...:00.000Z" would disagree at
+    the closed boundary. Runs once per database, guarded by a settings key.
+    """
+    if get_setting(conn, TIMESTAMP_FORMAT_KEY, None):
+        return 0
+    normalized = "strftime('%Y-%m-%dT%H:%M:%fZ', timestamp)"
+    cursor = conn.execute(
+        f"""UPDATE events SET timestamp = {normalized}
+            WHERE timestamp IS NOT NULL
+              AND {normalized} IS NOT NULL
+              AND timestamp <> {normalized}"""
+    )
+    changed = max(cursor.rowcount, 0)
+    set_setting(conn, TIMESTAMP_FORMAT_KEY, {"version": 1, "rows": changed, "at": utc_now()})
+    return changed
+
+
 STATS_VERSION_KEY = "db_stats_version"
 STATS_VERSION = 2
 
@@ -366,6 +390,9 @@ def init_db(db_path: str | Path | None = None) -> None:
                 "INSERT OR IGNORE INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)",
                 (key, json_dumps(value), now),
             )
+        normalized = normalize_event_timestamps(conn)
+        if normalized:
+            log_system(conn, "info", "storage", f"已统一 {normalized} 条事件的时间精度", {"rows": normalized})
         _refresh_planner_stats(conn)
         migration = migrate_agent_roots(conn)
         if migration["agents"]:

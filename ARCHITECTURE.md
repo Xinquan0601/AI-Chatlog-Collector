@@ -136,7 +136,9 @@ flowchart TB
 
 ### 3.4 导出
 
-1. UI 先调 `GET /api/export/estimate`，用与导出完全相同的筛选参数试算条数、会话数与体积，超限直接禁用按钮。
+「数据导出」页（`web/assets/pages/export.js`，路由 `#/export`）与旧导出对话框共用同一套接口，但提供跨会话的批量筛选：AGENTS 多选、事件类型多选、闭区间日期与快捷范围。多选组内为 OR、组间为 AND；日期在前端按本地自然日转换为 UTC 毫秒边界（`00:00:00.000` ~ `23:59:59.999`），服务端统一用 `>=` / `<=` 比较 `events.timestamp`。
+
+1. UI 先调 `GET /api/export/estimate`，用与导出完全相同的筛选参数试算条数、会话数与体积，超限直接禁用按钮；响应额外带 `by_agent`（只应用除 Agent 外的条件），让每张 Agent 卡片显示自己的命中数。
 2. 服务端按筛选条件 count；超过 `export_max_rows` 返回 413。
 3. 生成临时文件：
    - CSV：UTF-8 BOM、公式注入防护；
@@ -505,6 +507,16 @@ Agent 卡片 → 配置 → 编辑 roots / patterns / 调度 / 重试
 → 趋势 / 结构 / 工具 / 项目
 → 选时间范围（含自定义日期）与事件角色
 → GET /api/export/estimate 试算 → GET /api/export → 浏览器下载
+```
+
+**批量导出**
+
+```text
+左侧「数据导出」→ 多选 Agent / 事件类型
+→ 选日期快捷项或填写起止日期（本地自然日，闭区间）
+→ 实时试算（含每个 Agent 的命中数）
+→ GET /api/export?agents=…&from=…&to=…&types=…&format=bundle
+→ 浏览器下载
 ```
 
 ---

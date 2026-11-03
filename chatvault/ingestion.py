@@ -7,6 +7,7 @@ from .collectors import Source, collect_source, discover_sources
 from .constants import DEFAULT_AGENT_CONFIG
 from .db import get_agent, log_system
 from .utils import (
+    iso_from_any,
     json_dumps,
     json_loads,
     parse_date_bound,
@@ -219,6 +220,10 @@ def import_batch(conn: sqlite3.Connection, agent_key: str, batch: dict[str, Any]
                 existing["tool_input_json"] = next_input or existing["tool_input_json"]
                 stats["events_updated"] += 1
             continue
+        # Store one canonical timestamp format (UTC, millisecond precision). Mixed
+        # precisions would otherwise break the lexicographic range comparison used
+        # by the export filters, e.g. "...:00Z" sorts before "...:00.000Z".
+        timestamp = iso_from_any(event.get("timestamp")) or iso_from_any(utc_now())
         try:
             cursor = conn.execute(
                 """INSERT INTO events
@@ -228,7 +233,7 @@ def import_batch(conn: sqlite3.Connection, agent_key: str, batch: dict[str, Any]
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     agent_key, session_id, event["type"], event.get("source_event_id"),
-                    int(event.get("sequence") or 0), event.get("timestamp") or utc_now(), content,
+                    int(event.get("sequence") or 0), timestamp, content,
                     event.get("tool_name"), event.get("tool_call_id"), event.get("tool_status"),
                     event.get("tool_input_json"), event.get("model"),
                     event.get("tokens_input"), event.get("tokens_output"),

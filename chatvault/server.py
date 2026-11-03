@@ -881,6 +881,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._query("to"),
         )
         types = [item for item in (self._query("types", "") or "").split(",") if item]
+        # "agents" is the multi-select form used by the export panel; "agent" stays for
+        # backwards compatibility with the old single-agent dialog.
+        raw_agents = self._query("agents") or self._query("agent") or ""
+        agents = [item.strip() for item in raw_agents.split(",") if item.strip() and item.strip() != "all"]
         session_raw = self._query("session_id")
         session_id = None
         if session_raw:
@@ -889,7 +893,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             except ValueError:
                 raise APIError(400, "bad_request", "session_id 无效")
         return {
-            "agent": self._query("agent"),
+            "agents": agents,
             "start": start,
             "end": end,
             "event_types": types,
@@ -905,7 +909,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         result["limit"] = limit
         result["exceeded"] = result["total"] > limit
         result["filters"] = {
-            "agent": filters["agent"],
+            "agents": filters["agents"],
             "from": filters["start"],
             "to": filters["end"],
             "types": filters["event_types"],

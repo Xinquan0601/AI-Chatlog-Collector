@@ -444,6 +444,59 @@ class StorageTests(unittest.TestCase):
             finally:
                 Path(exported["path"]).unlink(missing_ok=True)
 
+    def test_export_multi_agent_and_inclusive_bounds(self):
+        codex_batch = {
+            "source_path": "demo/codex.jsonl",
+            "sessions": [{"external_id": "cx-1", "title": "Codex 会话", "project": "demo"}],
+            "events": [
+                {"session_external_id": "cx-1", "type": "user_message", "source_event_id": "u1", "sequence": 1, "timestamp": "2026-11-03T01:00:00Z", "content": "codex 起点"},
+            ],
+            "errors": [],
+        }
+        zcode_batch = {
+            "source_path": "demo/zcode.jsonl",
+            "sessions": [{"external_id": "zc-1", "title": "ZCode 会话", "project": "demo"}],
+            "events": [
+                {"session_external_id": "zc-1", "type": "user_message", "source_event_id": "u1", "sequence": 1, "timestamp": "2026-11-03T01:30:00Z", "content": "zcode 提问"},
+                {"session_external_id": "zc-1", "type": "assistant_message", "source_event_id": "a1", "sequence": 2, "timestamp": "2026-11-03T02:00:00Z", "content": "zcode 结束点"},
+            ],
+            "errors": [],
+        }
+        with connection(self.db_path) as conn:
+            import_batch(conn, "codex", codex_batch)
+            import_batch(conn, "zcode", zcode_batch)
+            conn.commit()
+
+            single = estimate_export(conn, agents=["codex"])
+            self.assertEqual(single["total"], 1)
+            self.assertEqual(single["agents"], ["codex"])
+
+            combined = estimate_export(conn, agents=["codex", "zcode"])
+            self.assertEqual(combined["total"], 3)
+            self.assertEqual(sorted(combined["by_type"].values()), [0, 0, 1, 2])
+
+            everything = estimate_export(conn)
+            self.assertEqual(everything["total"], 3)
+            self.assertEqual(everything["agents"], [])
+            self.assertEqual({item["agent_key"] for item in everything["by_agent"]}, {"codex", "zcode"})
+            self.assertEqual(sum(item["events"] for item in everything["by_agent"]), 3)
+
+            # Both the start and the end instant are part of the closed interval.
+            closed = estimate_export(conn, start="2026-11-03T01:00:00Z", end="2026-11-03T02:00:00Z")
+            self.assertEqual(closed["total"], 3)
+            just_before = estimate_export(conn, start="2026-11-03T01:00:00Z", end="2026-11-03T01:59:59.999Z")
+            self.assertEqual(just_before["total"], 2)
+
+            exported = create_export(conn, format="csv", agents=["codex", "zcode"])
+            try:
+                lines = [line for line in Path(exported["path"]).read_text(encoding="utf-8-sig").splitlines() if line]
+                self.assertEqual(len(lines), 4)
+                self.assertIn("codex", lines[1])
+                self.assertIn("zcode", lines[2] + lines[3])
+                self.assertEqual(exported["manifest"]["filters"]["agents"], ["codex", "zcode"])
+            finally:
+                Path(exported["path"]).unlink(missing_ok=True)
+
 
 LEGACY_EXPORT_SCHEMA = """
 CREATE TABLE export_meta (key TEXT PRIMARY KEY, value TEXT);

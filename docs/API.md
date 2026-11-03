@@ -171,33 +171,51 @@ Query：
 | 参数 | 说明 |
 |---|---|
 | format | csv / jsonl / json / bundle |
-| range | 快捷范围：24h / 7d / 30d / 90d / all |
-| from / to | 自定义起止时间（UTC ISO-8601，优先于 range） |
-| agent / q / project / session_id | 筛选 |
-| types | 逗号分隔的事件类型：`user_message,assistant_message,tool_call,tool_result`；省略表示全部 |
+| agents | 逗号分隔的 Agent key，可多选，组内为「或」；省略或 `all` 表示全部。`agents` 优先于 `agent` |
+| agent | 旧版单 Agent 过滤，等价于 `agents` 只有一个值 |
+| range | 快捷范围：24h / 7d / 30d / 90d / all；仅在未提供 `from` 时生效 |
+| from / to | 闭区间起止时间，可任意 ISO-8601 精度（服务端统一为 UTC 毫秒）；两侧可各自单独提供，`from` 优先于 `range`，`to` 独立生效 |
+| types | 逗号分隔的事件类型，可多选，组内为「或」：`user_message,assistant_message,tool_call,tool_result`；省略表示全部 |
+| q | 关键词，匹配 `content` 或 `tool_name`（不区分大小写） |
+| project / session_id | 项目 / 会话过滤 |
 
-成功返回附件；超出行数上限返回 413 `export_too_large`。
+未提供的条件不加限制；不同条件之间为「且」。成功返回附件；超出行数上限返回 413 `export_too_large`。
 
 ```bash
 curl -b cookies.txt -OJ \
-  "http://127.0.0.1:8787/api/export?format=bundle&agent=codex&range=30d"
+  "http://127.0.0.1:8787/api/export?format=bundle&agents=codex,zcode&range=30d&types=user_message,assistant_message"
 ```
 
 ### GET /api/export/estimate
 
-导出前的试算：参数与 `/api/export` 完全一致（`range`、`from`、`to`、`agent`、`q`、`project`、`session_id`、`types`），只统计、不生成文件。WebUI 的导出对话框用它实时显示条数与体积。
+导出前的试算：参数与 `/api/export` 完全一致（`agents` / `agent`、`range`、`from`、`to`、`types`、`q`、`project`、`session_id`），只统计、不生成文件。WebUI 的导出对话框与「数据导出」页都用它实时显示条数与体积。
+
+`by_agent` 只应用除 Agent 选择外的条件，因此每张 Agent 卡片都能显示「若选它」的命中数；`total` / `by_type` / `sessions` 则严格按 `agents` 过滤。下面示例中 `by_agent` 的数值可以大于 `total`，原因正是它忽略了 `agents` 选择（示例仅列前 3 项）。
 
 ```json
 {
   "ok": true,
   "data": {
-    "total": 70,
-    "by_type": {"user_message": 14, "assistant_message": 28, "tool_call": 14, "tool_result": 14},
-    "sessions": 12,
-    "bytes": 4838,
+    "total": 42,
+    "by_type": {"user_message": 14, "assistant_message": 28, "tool_call": 0, "tool_result": 0},
+    "sessions": 7,
+    "bytes": 36130,
+    "agents": ["codex", "zcode"],
+    "by_agent": [
+      {"agent_key": "workbuddy", "events": 1783, "sessions": 33},
+      {"agent_key": "opencode", "events": 625, "sessions": 29},
+      {"agent_key": "deepseekharness", "events": 100, "sessions": 6}
+    ],
     "limit": 200000,
     "exceeded": false,
-    "filters": {"agent": null, "from": "2026-11-01T00:00:00.000Z", "to": null, "types": ["user_message"], "session_id": null, "project": null}
+    "filters": {
+      "agents": ["codex", "zcode"],
+      "from": "2026-10-28T00:00:00.000Z",
+      "to": "2026-11-03T23:59:59.999Z",
+      "types": ["user_message", "assistant_message"],
+      "session_id": null,
+      "project": null
+    }
   }
 }
 ```
@@ -208,6 +226,9 @@ curl -b cookies.txt -OJ \
 | by_type | 四类事件的分别计数，未命中的类型为 0 |
 | sessions | 命中的会话数 |
 | bytes | 正文字节数加总，用于估算文件体积 |
+| agents | 规范化后的 Agent 过滤列表；空数组表示不限 |
+| by_agent | 每个 Agent 在「其余条件不变」时的命中事件数与会话数，按事件数降序 |
+| filters | 服务端实际生效的筛选条件（日期已归一化为 UTC 毫秒） |
 | limit | 当前 `export_max_rows` 设置 |
 | exceeded | 是否超过单次导出上限（为 true 时 `/api/export` 返回 413） |
 

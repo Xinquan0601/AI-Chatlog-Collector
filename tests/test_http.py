@@ -175,6 +175,35 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["data"]["total"], 0)
 
+        status, payload = self.call(admin, "/api/export/estimate?agents=codex")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["total"], 2)
+        self.assertEqual(payload["data"]["agents"], ["codex"])
+
+        status, payload = self.call(admin, "/api/export/estimate?agents=codex,zcode")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["total"], 2)
+        self.assertEqual(payload["data"]["agents"], ["codex", "zcode"])
+        self.assertEqual(payload["data"]["by_agent"][0]["agent_key"], "codex")
+
+        # The old single-agent parameter keeps working for the export dialog.
+        status, payload = self.call(admin, "/api/export/estimate?agent=codex")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["total"], 2)
+        self.assertEqual(payload["data"]["agents"], ["codex"])
+
+        status, payload = self.call(admin, "/api/export/estimate?agents=zcode")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["total"], 0)
+
+        # Closed interval: both the first and the last instants are included.
+        status, payload = self.call(
+            admin,
+            "/api/export/estimate?from=2026-11-03T01:00:00Z&to=2026-11-03T01:01:00Z",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["total"], 2)
+
         anonymous = self.opener()
         status, payload = self.call(anonymous, "/api/export/estimate")
         self.assertEqual(status, 401)
