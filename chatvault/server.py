@@ -77,7 +77,7 @@ from .db import (
     table_counts,
     update_settings,
 )
-from .exporting import ExportTooLarge, create_export
+from .exporting import ExportTooLarge, create_export, estimate_export
 from .ingestion import reset_source
 from .jobs import get_job_manager, init_job_manager
 from .utils import json_dumps, json_loads, utc_now
@@ -476,6 +476,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/export" and method == "GET":
             self._export(conn)
             return
+        if path == "/api/export/estimate" and method == "GET":
+            self._export_estimate(conn)
+            return
         if path == "/api/backups" and method == "GET":
             self._require_role("admin")
             self._send_json({
@@ -823,10 +826,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json({"job_id": new_job, "notice": notice}, 202)
 
     # ------------------------------------------------------------------ export
-    def _export(self, conn: sqlite3.Connection) -> None:
-        fmt = (self._query("format", "csv") or "csv").lower()
-        if fmt not in {"csv", "jsonl", "json", "bundle"}:
-            raise APIError(400, "bad_request", "不支持的导出格式")
+    def _export_filters(self) -> dict[str, Any]:
         start, end = resolve_time_range(
             self._query("range"),
             self._query("from"),
@@ -840,20 +840,45 @@ class RequestHandler(BaseHTTPRequestHandler):
                 session_id = int(session_raw)
             except ValueError:
                 raise APIError(400, "bad_request", "session_id 无效")
+        return {
+            "agent": self._query("agent"),
+            "start": start,
+            "end": end,
+            "event_types": types,
+            "q": self._query("q"),
+            "session_id": session_id,
+            "project": self._query("project"),
+        }
+
+    def _export_estimate(self, conn: sqlite3.Connection) -> None:
+        filters = self._export_filters()
+        result = estimate_export(conn, **filters)
+        limit = int(get_settings(conn).get("export_max_rows") or 200000)
+        result["limit"] = limit
+        result["exceeded"] = result["total"] > limit
+        result["filters"] = {
+            "agent": filters["agent"],
+            "from": filters["start"],
+            "to": filters["end"],
+            "types": filters["event_types"],
+            "session_id": filters["session_id"],
+            "project": filters["project"],
+        }
+        self._send_json(result)
+
+    def _export(self, conn: sqlite3.Connection) -> None:
+        fmt = (self._query("format", "csv") or "csv").lower()
+        if fmt not in {"csv", "jsonl", "json", "bundle"}:
+            raise APIError(400, "bad_request", "不支持的导出格式")
+        filters = self._export_filters()
         settings = get_settings(conn)
         try:
             exported = create_export(
                 conn,
                 format=fmt,
-                agent=self._query("agent"),
-                start=start,
-                end=end,
-                event_types=types,
-                q=self._query("q"),
-                session_id=session_id,
-                project=self._query("project"),
                 max_rows=int(settings.get("export_max_rows") or 200000),
                 requested_by=self.user.get("username") if self.user else None,
+                **filters,
             )
         except ExportTooLarge as exc:
             raise APIError(413, "export_too_large", str(exc))

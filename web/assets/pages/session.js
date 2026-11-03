@@ -1,9 +1,10 @@
 import {
-  api, download, state, isCurrent, setView, emptyState, icon, esc, attr, num, compact,
+  api, state, isCurrent, setView, emptyState, icon, esc, attr, num, compact,
   agentGlyph, agentMeta, eventMeta, eventTypeLabel, eventIconName, fmtDate, fmtFull,
   fmtTime, fmtDuration, relTime, formatRichText, prettyJson, toolSummary, pagination,
   hrefFor, toQuery, navigate, showToast, showModal, copyText, truncate
 } from '../core.js';
+import { openExportDialog } from '../export-dialog.js';
 
 const EVENT_ORDER = ['all', 'user_message', 'assistant_message', 'tool_call', 'tool_result'];
 
@@ -51,7 +52,7 @@ function draw(data, query, id, signal) {
   const header = '<div class="detail-head"><a class="back-link" href="' + hrefFor('sessions', { agent: session.agent_key }) + '">' + icon('arrow-left') + '<span>返回会话列表</span></a>' +
     '<div class="detail-title-row">' + agentGlyph(agent) +
     '<div class="detail-title-main"><h1>' + esc(session.title || '未命名会话') + '</h1><div class="detail-meta"><span>' + esc(session.agent_name) + '</span><span class="sep"></span><span>' + esc(session.project || '未标注项目') + '</span><span class="sep"></span><span>' + fmtFull(session.started_at) + '</span><span class="sep"></span><span>' + fmtDuration(session.started_at, session.ended_at) + '</span>' + (session.model ? '<span class="sep"></span><span class="mono">' + esc(session.model) + '</span>' : '') + '</div></div>' +
-    '<div class="detail-actions"><button class="btn btn-ghost btn-sm" data-copy-link title="复制当前链接">' + icon('copy') + '<span>复制链接</span></button><button class="btn btn-primary btn-sm" data-export-session="' + session.id + '">' + icon('download') + '<span>导出本会话</span></button></div></div></div>';
+    '<div class="detail-actions"><button class="btn btn-ghost btn-sm" data-copy-link title="复制当前链接">' + icon('copy') + '<span>复制链接</span></button><button class="btn btn-primary btn-sm" data-export-session="' + session.id + '" data-export-title="' + attr(session.title || '') + '">' + icon('download') + '<span>导出本会话</span></button></div></div></div>';
 
   const summary = '<div class="summary-strip">' +
     '<div class="summary-cell"><b>' + num(counts.user_message) + '</b><span>用户消息</span></div>' +
@@ -101,7 +102,7 @@ function draw(data, query, id, signal) {
     }).join('') + '</div>' : '<p class="modal-text">本会话没有工具调用。</p>') +
     '</div></section>';
 
-  const exportPanel = '<section class="panel"><div class="panel-body"><div style="display:flex;gap:9px;align-items:flex-start"><span class="backup-file-icon">' + icon('archive') + '</span><div><h3 class="panel-title" style="margin-bottom:4px">分析与归档</h3><p class="modal-text">导出本会话的全部规范事件、会话摘要与数据字典，适合离线分析。</p></div></div><button class="btn btn-secondary btn-sm btn-block" style="margin-top:12px" data-export-session="' + session.id + '">' + icon('download') + '<span>下载分析包 (.zip)</span></button></div></section>';
+  const exportPanel = '<section class="panel"><div class="panel-body"><div style="display:flex;gap:9px;align-items:flex-start"><span class="backup-file-icon">' + icon('archive') + '</span><div><h3 class="panel-title" style="margin-bottom:4px">分析与归档</h3><p class="modal-text">导出本会话的全部规范事件、会话摘要与数据字典，适合离线分析。</p></div></div><button class="btn btn-secondary btn-sm btn-block" style="margin-top:12px" data-export-session="' + session.id + '" data-export-title="' + attr(session.title || '') + '">' + icon('download') + '<span>导出本会话</span></button></div></section>';
 
   const html = '<div class="page">' + header + summary + '<div class="detail-layout"><div class="detail-main">' + timeline + '</div><aside class="detail-side">' + metaPanel + toolsPanel + exportPanel + '</aside></div></div>';
 
@@ -112,7 +113,7 @@ function draw(data, query, id, signal) {
       const copy = event.target.closest('[data-event-copy]');
       if (copy) { event.preventDefault(); copyEvent(copy.dataset.eventCopy); return; }
       const exportButton = event.target.closest('[data-export-session]');
-      if (exportButton) { event.preventDefault(); exportSession(exportButton.dataset.exportSession, exportButton); return; }
+      if (exportButton) { event.preventDefault(); exportSession(exportButton.dataset.exportSession, exportButton.dataset.exportTitle || ''); return; }
       const copyLink = event.target.closest('[data-copy-link]');
       if (copyLink) {
         event.preventDefault();
@@ -247,20 +248,12 @@ async function copyEvent(eventId) {
   }
 }
 
-async function exportSession(id, button) {
-  const original = button.innerHTML;
-  button.disabled = true;
-  button.innerHTML = '<span class="spinner tiny"></span><span>准备中</span>';
-  try {
-    const params = new URLSearchParams();
-    params.set('format', 'bundle');
-    params.set('session_id', String(id));
-    const filename = await download('/api/export?' + params.toString(), 'agenttrail-session.zip');
-    showToast('已导出：' + filename, 'success');
-  } catch (error) {
-    showToast(error.message, 'error', '导出失败');
-  } finally {
-    button.disabled = false;
-    button.innerHTML = original;
-  }
+function exportSession(id, title) {
+  openExportDialog({
+    context: { session_id: String(id) },
+    scope: '仅本会话' + (title ? '：' + title : ''),
+    format: 'bundle',
+    title: '导出本会话',
+    subtitle: '只包含这一个会话的事件，可按角色筛选后再导出。'
+  });
 }

@@ -1,8 +1,9 @@
 import {
-  api, download, state, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
+  api, state, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
   esc, attr, num, compact, agentGlyph, agentOptions, fmtDate, fmtDuration, relTime,
   localInput, fromLocal, pagination, navigate, showToast, toQuery
 } from '../core.js';
+import { openExportDialog } from '../export-dialog.js';
 
 export async function render(params, token, signal) {
   setView(skeletonPage('会话记录'));
@@ -92,7 +93,7 @@ function draw(data, query, signal) {
       const exportButton = event.target.closest('[data-export-sessions]');
       if (exportButton) {
         event.preventDefault();
-        exportSessions(query, exportButton);
+        exportSessions(query);
       }
     }, { signal: sig });
   });
@@ -129,23 +130,11 @@ function rangeLabel(from) {
   return 'custom';
 }
 
-async function exportSessions(query, button) {
-  const original = button.innerHTML;
-  button.disabled = true;
-  button.innerHTML = '<span class="spinner tiny"></span><span>准备中</span>';
-  try {
-    const params = new URLSearchParams();
-    params.set('format', 'bundle');
-    if (query.agent) params.set('agent', query.agent);
-    if (query.q) params.set('q', query.q);
-    if (query.from) params.set('from', query.from);
-    if (query.to) params.set('to', query.to);
-    const filename = await download('/api/export?' + params.toString(), 'agenttrail-export.zip');
-    showToast('已生成分析包：' + filename, 'success');
-  } catch (error) {
-    showToast(error.message, 'error', '导出失败');
-  } finally {
-    button.disabled = false;
-    button.innerHTML = original;
-  }
+function exportSessions(query) {
+  openExportDialog({
+    context: { agent: query.agent, q: query.q, from: query.from, to: query.to },
+    format: 'bundle',
+    title: '导出会话事件',
+    subtitle: '沿用当前筛选条件，可再调整时间范围与事件角色。'
+  });
 }

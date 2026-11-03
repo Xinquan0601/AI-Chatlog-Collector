@@ -169,11 +169,10 @@ Query：
 | 参数 | 说明 |
 |---|---|
 | format | csv / jsonl / json / bundle |
-| agent / from / to | 筛选 |
-| types | 逗号分隔的事件类型 |
-| q | 关键词 |
-| session_id | 单会话 |
-| project | 精确项目 |
+| range | 快捷范围：24h / 7d / 30d / 90d / all |
+| from / to | 自定义起止时间（UTC ISO-8601，优先于 range） |
+| agent / q / project / session_id | 筛选 |
+| types | 逗号分隔的事件类型：`user_message,assistant_message,tool_call,tool_result`；省略表示全部 |
 
 成功返回附件；超出行数上限返回 413 `export_too_large`。
 
@@ -181,6 +180,34 @@ Query：
 curl -b cookies.txt -OJ \
   "http://127.0.0.1:8787/api/export?format=bundle&agent=codex&range=30d"
 ```
+
+### GET /api/export/estimate
+
+导出前的试算：参数与 `/api/export` 完全一致（`range`、`from`、`to`、`agent`、`q`、`project`、`session_id`、`types`），只统计、不生成文件。WebUI 的导出对话框用它实时显示条数与体积。
+
+```json
+{
+  "ok": true,
+  "data": {
+    "total": 70,
+    "by_type": {"user_message": 14, "assistant_message": 28, "tool_call": 14, "tool_result": 14},
+    "sessions": 12,
+    "bytes": 4838,
+    "limit": 200000,
+    "exceeded": false,
+    "filters": {"agent": null, "from": "2026-11-01T00:00:00.000Z", "to": null, "types": ["user_message"], "session_id": null, "project": null}
+  }
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| total | 匹配的事件总数（等于 `by_type` 之和） |
+| by_type | 四类事件的分别计数，未命中的类型为 0 |
+| sessions | 命中的会话数 |
+| bytes | 正文字节数加总，用于估算文件体积 |
+| limit | 当前 `export_max_rows` 设置 |
+| exceeded | 是否超过单次导出上限（为 true 时 `/api/export` 返回 413） |
 
 ---
 

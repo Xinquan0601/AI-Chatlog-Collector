@@ -16,7 +16,7 @@ from chatvault.auth import (
     resolve_session,
 )
 from chatvault.db import connection, get_settings, init_db, list_agents
-from chatvault.exporting import create_export
+from chatvault.exporting import create_export, estimate_export
 from chatvault.ingestion import import_batch, refresh_session_aggregates
 from chatvault.parsers import (
     parse_claude_jsonl,
@@ -223,6 +223,44 @@ class StorageTests(unittest.TestCase):
                 text = Path(exported["path"]).read_text(encoding="utf-8-sig")
                 self.assertIn("'=SUM(A1:A2)", text)
                 self.assertIn("'=HYPERLINK", text)
+            finally:
+                Path(exported["path"]).unlink(missing_ok=True)
+
+    def test_export_estimate_matches_role_filter(self):
+        batch = {
+            "source_path": "demo/estimate.jsonl",
+            "sessions": [{"external_id": "est", "title": "统计会话", "project": "demo"}],
+            "events": [
+                {"session_external_id": "est", "type": "user_message", "source_event_id": "u1", "sequence": 1, "timestamp": "2026-11-03T01:00:00Z", "content": "导出我的消息"},
+                {"session_external_id": "est", "type": "assistant_message", "source_event_id": "a1", "sequence": 2, "timestamp": "2026-11-03T01:01:00Z", "content": "好的"},
+                {"session_external_id": "est", "type": "tool_call", "source_event_id": "c1", "sequence": 3, "timestamp": "2026-11-03T01:02:00Z", "content": "", "tool_name": "read_file", "tool_call_id": "call-1", "tool_input_json": json_dumps({"path": "a.txt"})},
+                {"session_external_id": "est", "type": "tool_result", "source_event_id": "r1", "sequence": 4, "timestamp": "2026-11-03T01:03:00Z", "content": "ok", "tool_call_id": "call-1"},
+            ],
+            "errors": [],
+        }
+        with connection(self.db_path) as conn:
+            import_batch(conn, "codex", batch)
+            conn.commit()
+            everything = estimate_export(conn)
+            self.assertEqual(everything["total"], 4)
+            self.assertEqual(everything["sessions"], 1)
+            self.assertEqual(sorted(everything["by_type"].values()), [1, 1, 1, 1])
+            self.assertGreater(everything["bytes"], 0)
+
+            picked = estimate_export(conn, event_types=["user_message", "tool_call"])
+            self.assertEqual(picked["total"], 2)
+            self.assertEqual(picked["by_type"], {"user_message": 1, "assistant_message": 0, "tool_call": 1, "tool_result": 0})
+
+            empty = estimate_export(conn, start="2026-12-01T00:00:00Z")
+            self.assertEqual(empty["total"], 0)
+            self.assertEqual(empty["sessions"], 0)
+
+            exported = create_export(conn, format="csv", event_types=["user_message", "tool_call"], agent="codex")
+            try:
+                lines = [line for line in Path(exported["path"]).read_text(encoding="utf-8-sig").splitlines() if line]
+                self.assertEqual(len(lines), 3)
+                self.assertIn("user_message", lines[1] + lines[2])
+                self.assertNotIn("assistant_message", lines[1] + lines[2])
             finally:
                 Path(exported["path"]).unlink(missing_ok=True)
 

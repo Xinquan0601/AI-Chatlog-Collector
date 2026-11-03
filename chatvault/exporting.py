@@ -186,6 +186,46 @@ def _write_bundle(
         archive.writestr("data_dictionary.md", DATA_DICTIONARY)
 
 
+def estimate_export(
+    conn: sqlite3.Connection,
+    *,
+    agent: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    event_types: list[str] | None = None,
+    q: str | None = None,
+    session_id: int | None = None,
+    project: str | None = None,
+) -> dict[str, Any]:
+    """Count what a matching export would contain, without materializing it."""
+    where_sql, params = _export_where(agent, start, end, event_types, q, session_id, project)
+    rows = conn.execute(
+        f"""SELECT e.type AS type, COUNT(*) AS total,
+                   COALESCE(SUM(LENGTH(CAST(e.content AS BLOB))), 0) AS bytes,
+                   COALESCE(SUM(LENGTH(CAST(e.tool_input_json AS BLOB))), 0) AS tool_bytes
+            FROM events e JOIN sessions s ON s.id=e.session_id
+            WHERE {where_sql}
+            GROUP BY e.type""",
+        params,
+    ).fetchall()
+    by_type = {item: 0 for item in EVENT_TYPES}
+    bytes_total = 0
+    for row in rows:
+        if row["type"] in by_type:
+            by_type[row["type"]] = int(row["total"])
+        bytes_total += int(row["bytes"] or 0) + int(row["tool_bytes"] or 0)
+    session_total = conn.execute(
+        f"SELECT COUNT(DISTINCT e.session_id) FROM events e JOIN sessions s ON s.id=e.session_id WHERE {where_sql}",
+        params,
+    ).fetchone()[0]
+    return {
+        "total": sum(by_type.values()),
+        "by_type": by_type,
+        "sessions": int(session_total or 0),
+        "bytes": bytes_total,
+    }
+
+
 def create_export(
     conn: sqlite3.Connection,
     *,

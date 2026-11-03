@@ -111,6 +111,35 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["data"]["totals"]["events"], 2)
 
+    def test_03_export_estimate(self):
+        admin = self.opener()
+        status, _ = self.login(admin, "admin", "test-admin-123")
+        self.assertEqual(status, 200)
+        status, payload = self.call(admin, "/api/export/estimate")
+        self.assertEqual(status, 200)
+        data = payload["data"]
+        self.assertEqual(data["total"], 2)
+        self.assertEqual(data["sessions"], 1)
+        self.assertEqual(data["by_type"]["user_message"], 1)
+        self.assertEqual(data["by_type"]["assistant_message"], 1)
+        self.assertEqual(data["by_type"]["tool_call"], 0)
+        self.assertFalse(data["exceeded"])
+        self.assertGreater(data["limit"], 0)
+        self.assertGreater(data["bytes"], 0)
+
+        status, payload = self.call(admin, "/api/export/estimate?types=assistant_message")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["total"], 1)
+        self.assertEqual(payload["data"]["by_type"]["user_message"], 0)
+
+        status, payload = self.call(admin, "/api/export/estimate?from=2026-12-01T00:00:00Z")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["total"], 0)
+
+        anonymous = self.opener()
+        status, payload = self.call(anonymous, "/api/export/estimate")
+        self.assertEqual(status, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

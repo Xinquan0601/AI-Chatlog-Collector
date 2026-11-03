@@ -135,13 +135,14 @@ flowchart TB
 
 ### 3.4 导出
 
-1. 服务端按筛选条件 count；超过 `export_max_rows` 返回 413。
-2. 生成临时文件：
+1. UI 先调 `GET /api/export/estimate`，用与导出完全相同的筛选参数试算条数、会话数与体积，超限直接禁用按钮。
+2. 服务端按筛选条件 count；超过 `export_max_rows` 返回 413。
+3. 生成临时文件：
    - CSV：UTF-8 BOM、公式注入防护；
    - JSONL：逐行写出；
    - ZIP：写 events.csv、sessions.csv、summary.json、manifest.json、data_dictionary.md。
-3. 审计记录导出条件与数量。
-4. 以附件流式发送；发送后删除临时文件。
+4. 审计记录导出条件与数量。
+5. 以附件流式发送；发送后删除临时文件。
 
 ### 3.5 备份
 
@@ -452,7 +453,8 @@ Agent 卡片 → 配置 → 编辑 roots / patterns / 调度 / 重试
 → 按四类事件筛选 / 会话内搜索
 → 查看工具入参 / 结果
 → 大字段按需 GET /api/events/{id}
-→ 导出本会话 ZIP
+→ 导出本会话：对话框勾选角色 / 日期
+→ GET /api/export?session_id=…&types=…
 ```
 
 **分析导出**
@@ -460,8 +462,8 @@ Agent 卡片 → 配置 → 编辑 roots / patterns / 调度 / 重试
 ```text
 统计分析 → 选时间范围 / Agent
 → 趋势 / 结构 / 工具 / 项目
-→ 选导出格式
-→ GET /api/export → 浏览器下载
+→ 选时间范围（含自定义日期）与事件角色
+→ GET /api/export/estimate 试算 → GET /api/export → 浏览器下载
 ```
 
 ---

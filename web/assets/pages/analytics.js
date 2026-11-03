@@ -1,9 +1,10 @@
 import {
-  api, download, state, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
+  api, state, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
   esc, attr, num, compact, pct, agentGlyph, agentOptions, eventMeta, fmtDate,
   stackedChart, donutSvg, typeLegend, kpiCard, legendSwatch, navigate, showToast,
   localInput, fromLocal, toQuery
 } from '../core.js';
+import { openExportDialog } from '../export-dialog.js';
 
 const RANGES = [
   { key: '7d', label: '7 天', days: 7 },
@@ -116,7 +117,7 @@ function draw(data, query, signal) {
     return '<button class="format-card ' + (state.analyticsFormat === format.key ? 'selected' : '') + '" type="button" data-format="' + format.key + '"><div class="format-top"><strong>' + format.title + '</strong><span class="format-icon">' + icon(format.key === 'bundle' ? 'archive' : format.key === 'csv' ? 'file-text' : 'code') + '</span></div><p>' + format.desc + '</p><div class="format-ext mono">' + format.ext + '</div></button>';
   }).join('');
 
-  const exportPanel = '<section class="panel export-panel"><div class="panel-head"><div><h2 class="panel-title">导出分析数据</h2><p class="panel-sub">当前筛选：' + esc(agentLabel) + ' · ' + esc(rangeLabel) + ' · ' + num(summary.events) + ' 条事件</p></div><span class="badge accent"><span class="dot"></span>READY</span></div><div class="panel-body"><div class="export-grid">' + formatCards + '</div><div class="export-actions"><div class="export-hint">导出会保留统一后的四类事件结构，并附带工具调用关联 ID 与 <b>fingerprint</b>。时间字段统一为 UTC ISO-8601，便于跨时区分析。</div><button class="btn btn-primary" type="button" data-export-analytics>' + icon('download') + '<span>下载 ' + (state.analyticsFormat === 'bundle' ? '分析包' : state.analyticsFormat === 'csv' ? 'CSV' : 'JSONL') + '</span></button></div></div></section>';
+  const exportPanel = '<section class="panel export-panel"><div class="panel-head"><div><h2 class="panel-title">导出分析数据</h2><p class="panel-sub">当前筛选：' + esc(agentLabel) + ' · ' + esc(rangeLabel) + ' · ' + num(summary.events) + ' 条事件</p></div><span class="badge accent"><span class="dot"></span>READY</span></div><div class="panel-body"><div class="export-grid">' + formatCards + '</div><div class="export-actions"><div class="export-hint">导出会保留统一后的四类事件结构，并附带工具调用关联 ID 与 <b>fingerprint</b>。时间字段统一为 UTC ISO-8601，便于跨时区分析。</div><button class="btn btn-primary" type="button" data-export-analytics>' + icon('download') + '<span>导出 ' + (state.analyticsFormat === 'bundle' ? '分析包' : state.analyticsFormat === 'csv' ? 'CSV' : 'JSONL') + '</span></button></div></div></section>';
 
   const header = pageHead({
     eyebrow: 'ANALYTICS / UNIFIED EVENT MODEL',
@@ -154,35 +155,24 @@ function draw(data, query, signal) {
           state.analyticsFormat = format.dataset.format;
           root.querySelectorAll('[data-format]').forEach(function (element) { element.classList.toggle('selected', element === format); });
           const label = state.analyticsFormat === 'bundle' ? '分析包' : state.analyticsFormat === 'csv' ? 'CSV' : 'JSONL';
-          root.querySelectorAll('[data-export-analytics] span:last-child').forEach(function (element) { element.textContent = '下载 ' + label; });
+          root.querySelectorAll('[data-export-analytics] span:last-child').forEach(function (element) { element.textContent = '导出 ' + label; });
           return;
         }
         const exportButton = event.target.closest('[data-export-analytics]');
         if (exportButton) {
           event.preventDefault();
-          exportData(query, exportButton);
+          exportData(query);
         }
       }, { signal: sig });
     });
 }
 
-async function exportData(query, button) {
-  const original = button.innerHTML;
-  button.disabled = true;
-  button.innerHTML = '<span class="spinner tiny"></span><span>导出中…</span>';
-  try {
-    const params = new URLSearchParams();
-    params.set('format', state.analyticsFormat || 'bundle');
-    if (query.agent && query.agent !== 'all') params.set('agent', query.agent);
-    if (query.from) params.set('from', query.from);
-    if (query.to) params.set('to', query.to);
-    if (!query.from && query.range && query.range !== 'custom') params.set('range', query.range);
-    const filename = await download('/api/export?' + params.toString(), 'agenttrail-export');
-    showToast('已生成：' + filename, 'success');
-  } catch (error) {
-    showToast(error.message, 'error', '导出失败');
-  } finally {
-    button.disabled = false;
-    button.innerHTML = original;
-  }
+function exportData(query) {
+  openExportDialog({
+    context: { agent: query.agent === 'all' ? '' : query.agent, from: query.from, to: query.to },
+    format: state.analyticsFormat || 'bundle',
+    range: query.from ? 'custom' : (query.range || 'all'),
+    title: '导出分析数据',
+    subtitle: '按角色与时间范围导出规范事件，可直接用于 Excel、pandas 或归档。'
+  });
 }
