@@ -74,10 +74,10 @@ function draw(data, query, signal) {
     '<button class="btn btn-ghost btn-sm" type="button" data-export-analytics>' + icon('download') + '<span>导出</span></button></div></form>';
 
   const kpis = '<div class="kpi-grid">' +
-    kpiCard({ label: '事件总量', value: num(summary.events), icon: 'layers', color: '#6ef2c6', foot: '范围 · <b>' + esc(agentLabel) + '</b> / ' + esc(rangeLabel) }) +
-    kpiCard({ label: '覆盖会话', value: num(summary.sessions), icon: 'message', color: '#7dd3fc', foot: '平均 <b>' + num(summary.avg_events_per_session) + '</b> 事件 / 会话' }) +
-    kpiCard({ label: '工具调用', value: num(summary.tool_calls), icon: 'tool', color: '#f7c76b', foot: '结果 <b>' + num(summary.tool_results) + '</b> · 失败 <b class="' + (summary.tool_failures ? 'text-danger' : '') + '">' + num(summary.tool_failures) + '</b>' }) +
-    kpiCard({ label: '工具成功率', value: summary.tool_success_rate === null ? '—' : pct(summary.tool_success_rate), icon: 'circle-check', color: '#b7a4ff', foot: 'Token <b>' + compact(Number(summary.tokens_input || 0) + Number(summary.tokens_output || 0)) + '</b> 输入+输出' }) +
+    kpiCard({ label: '事件总量', value: num(summary.events), icon: 'layers', color: 'var(--accent)', foot: '范围 · <b>' + esc(agentLabel) + '</b> / ' + esc(rangeLabel) }) +
+    kpiCard({ label: '覆盖会话', value: num(summary.sessions), icon: 'message', color: 'var(--blue)', foot: '平均 <b>' + num(summary.avg_events_per_session) + '</b> 事件 / 会话' }) +
+    kpiCard({ label: '工具调用', value: num(summary.tool_calls), icon: 'tool', color: 'var(--amber)', foot: '结果 <b>' + num(summary.tool_results) + '</b> · 失败 <b class="' + (summary.tool_failures ? 'text-danger' : '') + '">' + num(summary.tool_failures) + '</b>' }) +
+    kpiCard({ label: '工具成功率', value: summary.tool_success_rate === null ? '—' : pct(summary.tool_success_rate), icon: 'circle-check', color: 'var(--purple)', foot: 'Token <b>' + compact(Number(summary.tokens_input || 0) + Number(summary.tokens_output || 0)) + '</b> 输入+输出' }) +
     '</div>';
 
   const legend = agents.filter(function (agent) { return byAgent.some(function (row) { return row.agent_key === agent.key; }); }).map(function (agent) {
@@ -93,7 +93,7 @@ function draw(data, query, signal) {
   const agentPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Agent 分布</h2><p class="panel-sub">事件规模与会话覆盖</p></div><span class="badge neutral">' + byAgent.length + ' ACTIVE</span></div><div class="panel-body">' +
     (byAgent.length ? '<div class="agent-bars">' + byAgent.map(function (row) {
       return '<div class="agent-bar-row">' + agentGlyph(row.agent_key) + '<span class="agent-bar-name">' + esc(row.name) + '</span><div class="agent-bar-track"><i style="width:' + Math.max(3, Math.round(Number(row.events || 0) * 100 / maxAgentEvents)) + '%;--bar-color:' + attr(row.color) + '"></i></div><span class="agent-bar-value">' + compact(row.events) + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between;margin:-4px 0 3px 102px;font-size:8px;color:var(--muted-2)"><span>' + num(row.sessions) + ' 会话 · 平均 ' + num(row.avg_events) + '</span><span class="mono">' + compact(Number(row.tokens_input || 0) + Number(row.tokens_output || 0)) + ' tok</span></div>';
+        '<div style="display:flex;justify-content:space-between;margin:-2px 0 4px 102px;font-size:10px;color:var(--muted-2)"><span>' + num(row.sessions) + ' 会话 · 平均 ' + num(row.avg_events) + '</span><span class="mono">' + compact(Number(row.tokens_input || 0) + Number(row.tokens_output || 0)) + ' tok</span></div>';
     }).join('') + '</div>' : emptyState('暂无 Agent 数据', '当前筛选范围内没有采集事件。', 'nodes')) + '</div></section>';
 
   const toolMax = Math.max.apply(null, tools.map(function (tool) { return Number(tool.calls || 0); }).concat([1]));

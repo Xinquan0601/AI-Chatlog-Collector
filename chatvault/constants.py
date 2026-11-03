@@ -27,10 +27,10 @@ PBKDF2_ITERATIONS = 310_000
 MAX_BODY_BYTES = 2 * 1024 * 1024
 
 EVENT_TYPES = {
-    "user_message": {"label": "用户消息", "short": "USER", "color": "#7dd3fc"},
-    "assistant_message": {"label": "助手消息", "short": "ASSISTANT", "color": "#6ee7b7"},
-    "tool_call": {"label": "工具调用", "short": "TOOL CALL", "color": "#fbbf24"},
-    "tool_result": {"label": "工具结果", "short": "TOOL RESULT", "color": "#c4b5fd"},
+    "user_message": {"label": "用户消息", "short": "USER", "color": "#2f63c8"},
+    "assistant_message": {"label": "助手消息", "short": "ASSISTANT", "color": "#0b7a63"},
+    "tool_call": {"label": "工具调用", "short": "TOOL CALL", "color": "#a8720f"},
+    "tool_result": {"label": "工具结果", "short": "TOOL RESULT", "color": "#6b4bd6"},
 }
 
 AGENT_DEFINITIONS = [
@@ -39,7 +39,7 @@ AGENT_DEFINITIONS = [
         "name": "Codex",
         "vendor": "OpenAI",
         "description": "读取 Codex Desktop / CLI 的 rollout JSONL，提取对话、函数调用与输出。",
-        "color": "#5eead4",
+        "color": "#0e7c66",
         "icon": "terminal",
         "adapter": "codex",
         "default_roots": ["~/.codex/sessions"],
@@ -51,7 +51,7 @@ AGENT_DEFINITIONS = [
         "name": "Claude Code",
         "vendor": "Anthropic",
         "description": "读取 ~/.claude/projects 下的会话 JSONL，保留 tool_use / tool_result 关联。",
-        "color": "#fbbf24",
+        "color": "#b4622b",
         "icon": "spark",
         "adapter": "claude",
         "default_roots": ["~/.claude/projects"],
@@ -63,7 +63,7 @@ AGENT_DEFINITIONS = [
         "name": "OpenCode",
         "vendor": "OpenCode",
         "description": "以只读方式接入 opencode.db，按消息更新时间做增量抽取。",
-        "color": "#a78bfa",
+        "color": "#4f46e5",
         "icon": "layers",
         "adapter": "opencode",
         "default_roots": ["~/.local/share/opencode/opencode.db"],
@@ -75,7 +75,7 @@ AGENT_DEFINITIONS = [
         "name": "WorkBuddy",
         "vendor": "Tencent",
         "description": "读取 .workbuddy/projects 下的项目会话 JSONL，兼容 CodeBuddy 消息格式。",
-        "color": "#60a5fa",
+        "color": "#2f63c8",
         "icon": "briefcase",
         "adapter": "claude",
         "default_roots": ["~/.workbuddy/projects"],
@@ -87,7 +87,7 @@ AGENT_DEFINITIONS = [
         "name": "DeepSeek Harness",
         "vendor": "DeepSeek",
         "description": "解析 DSH v4 会话事件流，支持明文与 zstd 压缩的 JSONL。",
-        "color": "#4ade80",
+        "color": "#6d8b1d",
         "icon": "orbit",
         "adapter": "dsh",
         "default_roots": ["~/.dsh/sessions"],
@@ -99,7 +99,7 @@ AGENT_DEFINITIONS = [
         "name": "ZCode",
         "vendor": "ZCode",
         "description": "通过通用消息适配器接入 ZCode 的 JSON / JSONL 会话目录。",
-        "color": "#f472b6",
+        "color": "#a03a76",
         "icon": "code",
         "adapter": "generic",
         "default_roots": ["~/.zcode/sessions", "~/.zcode/projects"],

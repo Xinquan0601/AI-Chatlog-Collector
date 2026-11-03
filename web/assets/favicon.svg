@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="15" fill="#081019"/>
-  <path d="M14 18 32 7.5 50 18v20L32 48.5 14 38z" fill="none" stroke="#6ef2c6" stroke-width="3"/>
-  <path d="M22.5 25.5 32 20.5l9.5 5v9.5L32 40l-9.5-5z" fill="#6ef2c6"/>
-  <path d="M32 48.5V56M23 55h18" fill="none" stroke="#6ef2c6" stroke-width="3" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="迹录 AgentTrail">
+  <rect width="64" height="64" rx="15" fill="#1b1a16"/>
+  <path d="M14 18 32 7.5 50 18v20L32 48.5 14 38z" fill="none" stroke="#e6dfcc" stroke-width="3"/>
+  <path d="M22.5 25.5 32 20.5l9.5 5v9.5L32 40l-9.5-5z" fill="#3fbf9c"/>
+  <path d="M32 48.5V56M23 55h18" fill="none" stroke="#e6dfcc" stroke-width="3" stroke-linecap="round"/>
 </svg>

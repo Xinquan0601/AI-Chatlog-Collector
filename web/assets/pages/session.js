@@ -101,7 +101,7 @@ function draw(data, query, id, signal) {
     }).join('') + '</div>' : '<p class="modal-text">本会话没有工具调用。</p>') +
     '</div></section>';
 
-  const exportPanel = '<section class="panel"><div class="panel-body"><div style="display:flex;gap:9px;align-items:flex-start"><span class="backup-file-icon">' + icon('archive') + '</span><div><h3 class="panel-title" style="margin-bottom:4px">分析与归档</h3><p class="modal-text" style="font-size:9.5px">导出本会话的全部规范事件、会话摘要与数据字典，适合离线分析。</p></div></div><button class="btn btn-secondary btn-sm btn-block" style="margin-top:12px" data-export-session="' + session.id + '">' + icon('download') + '<span>下载分析包 (.zip)</span></button></div></section>';
+  const exportPanel = '<section class="panel"><div class="panel-body"><div style="display:flex;gap:9px;align-items:flex-start"><span class="backup-file-icon">' + icon('archive') + '</span><div><h3 class="panel-title" style="margin-bottom:4px">分析与归档</h3><p class="modal-text">导出本会话的全部规范事件、会话摘要与数据字典，适合离线分析。</p></div></div><button class="btn btn-secondary btn-sm btn-block" style="margin-top:12px" data-export-session="' + session.id + '">' + icon('download') + '<span>下载分析包 (.zip)</span></button></div></section>';
 
   const html = '<div class="page">' + header + summary + '<div class="detail-layout"><div class="detail-main">' + timeline + '</div><aside class="detail-side">' + metaPanel + toolsPanel + exportPanel + '</aside></div></div>';
 
@@ -178,10 +178,10 @@ function renderEvent(event) {
     const input = event.tool_input !== undefined && event.tool_input !== null ? event.tool_input : event.tool_input_json;
     const hasInput = input !== null && input !== undefined && String(prettyJson(input)).length > 0;
     body = '<div class="tool-name-row"><span class="tool-name">' + esc(event.tool_name || 'tool') + '</span>' + toolStatusBadge(toolStatus) + '</div>' +
-      (hasInput ? '<div class="tool-args">' + toolSummary(input) + '</div><details class="tool-details"><summary>查看入参 JSON</summary><pre class="tool-json">' + esc(prettyJson(input)) + '</pre></details>' : '<p class="modal-text" style="font-size:9.5px">该工具没有记录入参。</p>');
+      (hasInput ? '<div class="tool-args">' + toolSummary(input) + '</div><details class="tool-details"><summary>查看入参 JSON</summary><pre class="tool-json">' + esc(prettyJson(input)) + '</pre></details>' : '<p class="modal-text">该工具没有记录入参。</p>');
   } else if (type === 'tool_result') {
     body = '<div class="tool-name-row">' + (event.tool_name ? '<span class="tool-name">' + esc(event.tool_name) + '</span>' : '<span class="tag">TOOL RESULT</span>') + toolStatusBadge(toolStatus) + '</div>' +
-      (content ? '<div class="event-content">' + formatRichText(content) + '</div>' : '<p class="modal-text" style="font-size:9.5px">工具未返回文本输出。</p>');
+      (content ? '<div class="event-content">' + formatRichText(content) + '</div>' : '<p class="modal-text">工具未返回文本输出。</p>');
   } else {
     body = '<div class="event-content">' + formatRichText(content || '（空消息）') + '</div>';
   }
@@ -204,9 +204,9 @@ function renderEvent(event) {
 function toolStatusBadge(status) {
   if (!status) return '';
   const lower = String(status).toLowerCase();
-  if (['success', 'completed', 'ok'].includes(lower)) return '<span class="badge accent" style="height:19px;font-size:8px">' + esc(status) + '</span>';
-  if (['error', 'failed'].includes(lower)) return '<span class="badge rose" style="height:19px;font-size:8px">' + esc(status) + '</span>';
-  return '<span class="badge neutral" style="height:19px;font-size:8px">' + esc(status) + '</span>';
+  if (['success', 'completed', 'ok'].includes(lower)) return '<span class="badge accent">' + esc(status) + '</span>';
+  if (['error', 'failed'].includes(lower)) return '<span class="badge rose">' + esc(status) + '</span>';
+  return '<span class="badge neutral">' + esc(status) + '</span>';
 }
 
 async function openEvent(eventId) {

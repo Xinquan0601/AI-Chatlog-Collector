@@ -42,7 +42,7 @@ function draw(data, query, signal) {
       '<span class="session-title-text"><strong>' + esc(session.title) + '</strong><span>' + esc(session.project || '未标注项目') + ' · ' + esc(session.model || '未知模型') + '</span></span></a></td>' +
       '<td><span class="badge" style="border-color:color-mix(in srgb, ' + attr(session.agent_color) + ' 25%, transparent);color:' + attr(session.agent_color) + '">' + esc(session.agent_name) + '</span></td>' +
       '<td><div class="cell-main">' + fmtDate(session.started_at) + '</div><div class="cell-sub">' + fmtDuration(session.started_at, session.ended_at) + '</div></td>' +
-      '<td><div class="mini-counts"><span><i style="background:#7dd3fc"></i>' + num(session.user_message_count || 0) + '</span><span><i style="background:#6ee7b7"></i>' + num(session.assistant_message_count || 0) + '</span><span><i style="background:#fbbf24"></i>' + num(session.tool_call_count || 0) + '</span></div></td>' +
+      '<td><div class="mini-counts"><span><i style="background:var(--blue)"></i>' + num(session.user_message_count || 0) + '</span><span><i style="background:var(--accent)"></i>' + num(session.assistant_message_count || 0) + '</span><span><i style="background:var(--amber)"></i>' + num(session.tool_call_count || 0) + '</span></div></td>' +
       '<td class="num">' + num(session.event_count || 0) + '</td>' +
       '<td class="num">' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</td>' +
       '<td class="cell-actions"><a class="btn btn-ghost btn-xs" href="#/sessions/' + session.id + '">打开' + icon('arrow-right') + '</a></td></tr>';

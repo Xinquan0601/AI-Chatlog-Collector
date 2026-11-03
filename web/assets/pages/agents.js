@@ -54,7 +54,7 @@ function draw(agents, signal) {
         return '<span class="root-chip" title="' + attr(root) + '">' + icon('folder') + esc(shortPath(root)) + '</span>';
       }).join('') : '<span class="root-chip">' + icon('alert-circle') + '未配置数据源路径</span>') + (roots.length > 3 ? '<span class="root-chip">+' + (roots.length - 3) + '</span>' : '') + '</div>' +
       '<div class="agent-card-foot">' +
-      (admin ? '<button class="btn btn-primary btn-xs" data-agent-sync="' + attr(agent.key) + '"' + (syncing ? ' disabled' : '') + '>' + icon(syncing ? 'refresh' : 'zap') + '<span>' + (syncing ? '采集中' : '立即同步') + '</span></button><button class="btn btn-ghost btn-xs" data-agent-config="' + attr(agent.key) + '">配置</button>' : '<a class="btn btn-ghost btn-xs" href="#/sessions?agent=' + attr(agent.key) + '">查看会话' + icon('arrow-right') + '</a>') +
+      (admin ? '<button class="btn btn-secondary btn-xs" data-agent-sync="' + attr(agent.key) + '"' + (syncing ? ' disabled' : '') + '>' + icon(syncing ? 'refresh' : 'zap') + '<span>' + (syncing ? '采集中' : '立即同步') + '</span></button><button class="btn btn-ghost btn-xs" data-agent-config="' + attr(agent.key) + '">配置</button>' : '<a class="btn btn-ghost btn-xs" href="#/sessions?agent=' + attr(agent.key) + '">查看会话' + icon('arrow-right') + '</a>') +
       '<span class="agent-last">' + (agent.last_scan_at ? fmtDate(agent.last_scan_at) : '等待首次同步') + '</span>' +
       '</div></article>';
   }).join('');

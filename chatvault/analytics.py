@@ -435,7 +435,7 @@ def analytics(
         item = dict(row)
         meta = agent_meta.get(item["agent_key"], {})
         item["name"] = meta.get("name", item["agent_key"]) if meta else item["agent_key"]
-        item["color"] = meta.get("color", "#94a3b8") if meta else "#94a3b8"
+        item["color"] = meta.get("color", "#8a8478") if meta else "#8a8478"
         item["avg_events"] = round(item["events"] / item["sessions"], 1) if item["sessions"] else 0
         by_agent.append(item)
 

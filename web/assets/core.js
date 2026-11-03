@@ -198,7 +198,7 @@ export function agentInitials(key) {
 
 export function agentMeta(key) {
   const found = (state.agents || []).find(function (agent) { return agent.key === key; });
-  return found || { key: key, name: key || '未知 Agent', color: '#94a3b8', vendor: '', status: 'idle' };
+  return found || { key: key, name: key || '未知 Agent', color: '#8a8478', vendor: '', status: 'idle' };
 }
 
 export function agentName(key) {
@@ -208,7 +208,7 @@ export function agentName(key) {
 export function agentGlyph(agentOrKey, extraClass) {
   const key = typeof agentOrKey === 'string' ? agentOrKey : (agentOrKey && agentOrKey.key);
   const meta = typeof agentOrKey === 'string' ? agentMeta(agentOrKey) : agentOrKey;
-  const color = (meta && meta.color) || agentMeta(key).color || '#94a3b8';
+  const color = (meta && meta.color) || agentMeta(key).color || '#8a8478';
   return '<span class="agent-glyph ' + (extraClass || '') + '" style="--agent-color:' + attr(color) + '" title="' + attr((meta && meta.name) || key) + '">' + esc(agentInitials(key)) + '</span>';
 }
 
@@ -257,10 +257,10 @@ export function jobStatusBadge(status) {
 }
 
 const EVENT_FALLBACK = {
-  user_message: { label: '用户消息', short: 'USER', color: '#7dd3fc' },
-  assistant_message: { label: '助手消息', short: 'ASSISTANT', color: '#6ee7b7' },
-  tool_call: { label: '工具调用', short: 'TOOL CALL', color: '#fbbf24' },
-  tool_result: { label: '工具结果', short: 'TOOL RESULT', color: '#c4b5fd' }
+  user_message: { label: '用户消息', short: 'USER', color: '#2f63c8' },
+  assistant_message: { label: '助手消息', short: 'ASSISTANT', color: '#0b7a63' },
+  tool_call: { label: '工具调用', short: 'TOOL CALL', color: '#a8720f' },
+  tool_result: { label: '工具结果', short: 'TOOL RESULT', color: '#6b4bd6' }
 };
 
 export function eventMeta(type) {
@@ -449,7 +449,7 @@ export function donutSvg(items, total, centerLabel) {
     offset += (value / sum) * circumference;
   });
   if (!circles) {
-    circles = '<circle cx="72" cy="72" r="' + radius + '" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="13"/>';
+    circles = '<circle cx="72" cy="72" r="' + radius + '" fill="none" stroke="var(--surface-4)" stroke-width="13"/>';
   }
   return '<div class="donut-wrap"><svg viewBox="0 0 ' + size + ' ' + size + '" aria-hidden="true">' + circles + '</svg><div class="donut-center"><strong>' + compact(sum) + '</strong><span>' + esc(centerLabel || 'TOTAL') + '</span></div></div>';
 }

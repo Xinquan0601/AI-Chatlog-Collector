@@ -31,10 +31,10 @@ function draw(data) {
   const storageRatio = storageTotal ? Math.min(100, Number(totals.db_size || 0) * 100 / storageTotal) : 0;
 
   const kpis = '<div class="kpi-grid">' +
-    kpiCard({ label: '会话总数', value: num(totals.sessions), icon: 'message', color: '#7dd3fc', spark: sparkline(sparks, '#7dd3fc'), foot: '<span class="kpi-trend up">+' + num(totals.events_24h) + '</span> 近 24h 事件' }) +
-    kpiCard({ label: '规范化事件', value: num(totals.events), icon: 'layers', color: '#6ef2c6', spark: sparkline(daily.map(function (row) { return row.types ? row.types.user_message + row.types.assistant_message : 0; }), '#6ef2c6'), foot: '消息 <b>' + num(Number(types.user_message || 0) + Number(types.assistant_message || 0)) + '</b> · 工具 <b>' + num(Number(types.tool_call || 0) + Number(types.tool_result || 0)) + '</b>' }) +
-    kpiCard({ label: '工具调用', value: num(types.tool_call), icon: 'tool', color: '#f7c76b', spark: sparkline(daily.map(function (row) { return row.types ? row.types.tool_call : 0; }), '#f7c76b'), foot: '成功率 <b class="text-accent">' + pct(totals.tool_success_rate) + '</b> · 结果 <b>' + num(types.tool_result) + '</b>' }) +
-    kpiCard({ label: '数据体积', value: bytes(storageTotal), icon: 'hard-drive', color: '#b7a4ff', spark: '', foot: '数据库 <b>' + bytes(totals.db_size) + '</b> · 备份 <b>' + bytes(totals.backup_size) + '</b>' }) +
+    kpiCard({ label: '会话总数', value: num(totals.sessions), icon: 'message', color: 'var(--blue)', spark: sparkline(sparks, '#2f63c8'), foot: '<span class="kpi-trend up">+' + num(totals.events_24h) + '</span> 近 24h 事件' }) +
+    kpiCard({ label: '规范化事件', value: num(totals.events), icon: 'layers', color: 'var(--accent)', spark: sparkline(daily.map(function (row) { return row.types ? row.types.user_message + row.types.assistant_message : 0; }), '#0b7a63'), foot: '消息 <b>' + num(Number(types.user_message || 0) + Number(types.assistant_message || 0)) + '</b> · 工具 <b>' + num(Number(types.tool_call || 0) + Number(types.tool_result || 0)) + '</b>' }) +
+    kpiCard({ label: '工具调用', value: num(types.tool_call), icon: 'tool', color: 'var(--amber)', spark: sparkline(daily.map(function (row) { return row.types ? row.types.tool_call : 0; }), '#a8720f'), foot: '成功率 <b class="text-accent">' + pct(totals.tool_success_rate) + '</b> · 结果 <b>' + num(types.tool_result) + '</b>' }) +
+    kpiCard({ label: '数据体积', value: bytes(storageTotal), icon: 'hard-drive', color: 'var(--purple)', spark: '', foot: '数据库 <b>' + bytes(totals.db_size) + '</b> · 备份 <b>' + bytes(totals.backup_size) + '</b>' }) +
     '</div>';
 
   const legend = agents.filter(function (agent) { return Number(agent.event_count || 0) > 0; }).map(function (agent) {
@@ -59,7 +59,7 @@ function draw(data) {
 
   const jobRows = jobs.length ? jobs.slice(0, 5).map(function (job) {
     const status = jobStatus(job.status);
-    const agent = agents.find(function (item) { return item.key === job.agent_key; }) || { key: job.agent_key, color: '#94a3b8', name: job.agent_key };
+    const agent = agents.find(function (item) { return item.key === job.agent_key; }) || { key: job.agent_key, color: '#8a8478', name: job.agent_key };
     return '<div class="job-row' + (job.status === 'queued' ? ' idle' : '') + '">' + agentGlyph(agent) +
       '<div class="job-row-main"><div class="job-row-title"><strong>' + esc(agent.name) + '</strong><span class="status-dot ' + status.dot + '"></span><span class="tag">' + esc(job.trigger || 'manual') + '</span></div><div class="job-row-meta">' + esc(job.message || status.label) + ' · ' + relTime(job.started_at || job.queued_at) + '</div>' +
       (job.status === 'running' ? '<div class="progress-line"><i style="width:' + Number(job.progress || 0) + '%"></i></div>' : '') + '</div>' +
@@ -69,7 +69,7 @@ function draw(data) {
   const jobsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">采集队列</h2><p class="panel-sub">任务进度与最近状态</p></div><div class="panel-actions"><a class="btn btn-ghost btn-xs" href="#/tasks">全部任务' + icon('arrow-right') + '</a></div></div><div class="panel-body" style="padding-top:6px"><div class="job-list">' + jobRows + '</div></div></section>';
 
   const storage = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">存储与覆盖</h2><p class="panel-sub">本地 SQLite 档案库</p></div><span class="badge ' + (health === 'ok' ? 'accent' : 'amber') + '"><span class="dot"></span>' + (health === 'ok' ? '运行正常' : '需关注') + '</span></div>' +
-    '<div class="panel-body"><div class="storage-visual"><div class="storage-ring"><svg viewBox="0 0 108 108"><circle cx="54" cy="54" r="44" fill="none" stroke="rgba(255,255,255,.055)" stroke-width="8"/><circle cx="54" cy="54" r="44" fill="none" stroke="#6ef2c6" stroke-width="8" stroke-linecap="round" stroke-dasharray="' + (2 * Math.PI * 44 * storageRatio / 100).toFixed(1) + ' 276.46"/></svg><div class="storage-center"><strong>' + bytes(storageTotal) + '</strong><span>TOTAL STORAGE</span></div></div>' +
+    '<div class="panel-body"><div class="storage-visual"><div class="storage-ring"><svg viewBox="0 0 108 108"><circle cx="54" cy="54" r="44" fill="none" stroke="var(--surface-4)" stroke-width="8"/><circle cx="54" cy="54" r="44" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round" stroke-dasharray="' + (2 * Math.PI * 44 * storageRatio / 100).toFixed(1) + ' 276.46"/></svg><div class="storage-center"><strong>' + bytes(storageTotal) + '</strong><span>TOTAL STORAGE</span></div></div>' +
     '<div class="storage-info"><div class="storage-row"><span>数据库</span><b>' + bytes(totals.db_size) + '</b></div><div class="storage-row"><span>备份</span><b>' + bytes(totals.backup_size) + '</b></div><div class="storage-row"><span>有效数据源</span><b>' + num(totals.active_sources) + '</b></div><div class="storage-row"><span>异常数据源</span><b class="' + (totals.source_errors ? 'text-danger' : '') + '">' + num(totals.source_errors) + '</b></div></div></div>' +
     '<div class="storage-note">输入 token <b class="mono" style="color:var(--text-soft)">' + compact(totals.tokens_input) + '</b> · 输出 <b class="mono" style="color:var(--text-soft)">' + compact(totals.tokens_output) + '</b><br>原始记录始终保留，规范化数据可重复导出。</div></div></section>';
 
@@ -80,7 +80,7 @@ function draw(data) {
     return '<tr><td><a href="#/sessions/' + session.id + '" class="session-title-cell">' + agentGlyph(agent) + '<span class="session-title-text"><strong>' + esc(session.title) + '</strong><span>' + esc(session.project || '未标注项目') + ' · ' + esc(session.model || '未知模型') + '</span></span></a></td>' +
       '<td><span class="badge" style="border-color:color-mix(in srgb, ' + attr(session.agent_color) + ' 25%, transparent);color:' + attr(session.agent_color) + '">' + esc(session.agent_name) + '</span></td>' +
       '<td><div class="cell-main">' + fmtDate(session.started_at) + '</div><div class="cell-sub">' + fmtDuration(session.started_at, session.ended_at) + '</div></td>' +
-      '<td><div class="mini-counts"><span><i style="background:#7dd3fc"></i>' + num(session.message_count) + '</span><span><i style="background:#fbbf24"></i>' + num(session.tool_call_count) + '</span></div></td>' +
+      '<td><div class="mini-counts"><span><i style="background:var(--blue)"></i>' + num(session.message_count) + '</span><span><i style="background:var(--amber)"></i>' + num(session.tool_call_count) + '</span></div></td>' +
       '<td class="num">' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</td>' +
       '<td class="cell-actions"><a class="btn btn-ghost btn-xs" href="#/sessions/' + session.id + '">查看' + icon('arrow-right') + '</a></td></tr>';
   }).join('') : '<tr><td colspan="6" class="table-empty">暂无会话记录</td></tr>';
