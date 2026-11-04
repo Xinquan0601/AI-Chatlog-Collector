@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -49,6 +50,7 @@ from .auth import (
 from .backup import backup_stats, create_backup, delete_backup, get_backup, list_backups
 from .constants import (
     AGENT_MAP,
+    API_REVISION,
     APP_NAME,
     APP_NAME_EN,
     BACKUP_DIR,
@@ -59,6 +61,7 @@ from .constants import (
     MAX_BODY_BYTES,
     MAX_PAGE_SIZE,
     PORT,
+    ROOT_DIR,
     SESSION_COOKIE,
     SESSION_TTL_SECONDS,
     VERSION,
@@ -107,6 +110,38 @@ MIME_TYPES = {
     ".txt": "text/plain; charset=utf-8",
     ".map": "application/json; charset=utf-8",
 }
+
+CACHEABLE_SUFFIXES = {".png", ".webp", ".ico", ".woff2"}
+NO_CACHE_SUFFIXES = {".html", ".js", ".mjs", ".css", ".svg", ".json", ".map"}
+
+# The web client is read from disk on every request, but Python modules are
+# loaded once at startup.  Updating the checkout while the server keeps
+# running therefore serves a new front end on top of an old back end, which
+# shows up as confusing 404 / 501 responses; this timestamp lets /api/health
+# report that state so the UI can ask for a restart.
+PROCESS_STARTED_AT = time.time()
+_SOURCE_SCAN = {"checked_at": 0.0, "stale": False}
+
+
+def source_paths() -> list[Path]:
+    return [ROOT_DIR / "app.py", *sorted((ROOT_DIR / "chatvault").glob("*.py"))]
+
+
+def running_code_stale() -> bool:
+    """Return True when Python files on disk are newer than this process."""
+    now = time.time()
+    if now - _SOURCE_SCAN["checked_at"] < 5.0:
+        return _SOURCE_SCAN["stale"]
+    newest = 0.0
+    for path in source_paths():
+        try:
+            newest = max(newest, path.stat().st_mtime)
+        except OSError:
+            continue
+    _SOURCE_SCAN["checked_at"] = now
+    _SOURCE_SCAN["stale"] = newest > PROCESS_STARTED_AT + 1.0
+    return _SOURCE_SCAN["stale"]
+
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -355,7 +390,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache" if target.name == "index.html" else "public, max-age=300")
+        if target.suffix.lower() in NO_CACHE_SUFFIXES:
+            cache_control = "no-cache"
+        elif target.suffix.lower() in CACHEABLE_SUFFIXES:
+            cache_control = "public, max-age=86400"
+        else:
+            cache_control = "public, max-age=300"
+        self.send_header("Cache-Control", cache_control)
         for key, value in SECURITY_HEADERS.items():
             self.send_header(key, value)
         for key, value in self._extra_headers:
@@ -371,6 +412,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
             self._send_json({
                 "name": APP_NAME, "name_en": APP_NAME_EN, "version": VERSION,
+                "api_revision": API_REVISION, "stale": running_code_stale(),
                 "status": "ok", "time": now, "initialized": user_count > 0,
             })
             return

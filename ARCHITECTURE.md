@@ -475,6 +475,7 @@ agent | session_external_id | event_type | source_event_id | tool_call_id
 - 页面模块按需导入；共享 `core.js`（状态、格式化、图表、模态框、toast、分页）。
 - 所有动态文本经过 HTML 转义；Markdown 只支持安全子集。
 - 内联 SVG 图标；无外部字体 / CDN。
+- 启动时请求 `/api/health` 校验 `api_revision` 与 `stale`：后端未返回版本、版本号与前端常量（`web/assets/app.js` 的 `API_REVISION`）不一致，或磁盘代码比进程启动时间新时，页面底部提示重启服务。静态资源使用 `no-cache`，避免更新后浏览器继续使用旧脚本。
 
 ### 8.2 页面状态
 

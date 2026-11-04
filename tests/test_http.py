@@ -12,7 +12,7 @@ import urllib.request
 import http.cookiejar
 from pathlib import Path
 
-from chatvault.constants import AGENT_DEFINITIONS
+from chatvault.constants import AGENT_DEFINITIONS, API_REVISION
 from chatvault.db import connection, init_db
 from chatvault.ingestion import import_batch
 from chatvault.jobs import get_job_manager
@@ -111,6 +111,17 @@ class HTTPTests(unittest.TestCase):
 
     def login(self, opener, username, password):
         return self.call(opener, "/api/auth/login", "POST", {"username": username, "password": password})
+
+    def test_00_health_and_static_cache(self):
+        opener = self.opener()
+        status, payload = self.call(opener, "/api/health")
+        self.assertEqual(status, 200)
+        data = payload["data"]
+        self.assertEqual(data["api_revision"], API_REVISION)
+        self.assertIsInstance(data["stale"], bool)
+        with opener.open(urllib.request.Request(self.base + "/assets/app.js"), timeout=15) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get("Cache-Control"), "no-cache")
 
     def test_01_auth_and_csrf(self):
         anonymous = self.opener()

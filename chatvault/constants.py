@@ -9,6 +9,10 @@ from . import __version__
 APP_NAME = "迹录"
 APP_NAME_EN = "AgentTrail"
 VERSION = __version__
+# Bumped whenever the HTTP contract changes. The web client ships the same
+# number, so a half-updated deployment (new page, old process) is reported as
+# a version mismatch instead of failing with puzzling 404 / 501 responses.
+API_REVISION = 1
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT_DIR / "web"

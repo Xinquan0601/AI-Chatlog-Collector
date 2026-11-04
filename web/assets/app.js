@@ -38,6 +38,12 @@ let routeAbort = null;
 let lastActiveJobs = 0;
 let bootstrapped = false;
 
+// Must match chatvault.constants.API_REVISION.  The server also reports the
+// revision of the process that is actually running, so a page served from a
+// freshly updated checkout on top of an old process is caught at startup
+// instead of failing later with 404 / 501 responses.
+const API_REVISION = 1;
+
 function parseRoute() {
   const raw = (location.hash || '#/overview').replace(/^#\/?/, '');
   const pieces = raw.split('?');
@@ -490,10 +496,65 @@ function bindGlobalEvents() {
   document.getElementById('sidebar-overlay').addEventListener('click', closeSidebar);
 }
 
+function versionProblems(health) {
+  if (!health) return ['无法读取后端版本信息。'];
+  const problems = [];
+  const backend = Number(health.api_revision);
+  if (!Number.isFinite(backend)) {
+    problems.push('正在运行的服务没有返回接口版本，说明后端仍是旧版本。');
+  } else if (backend !== API_REVISION) {
+    problems.push('页面接口版本 v' + API_REVISION + '，运行中的服务 v' + backend + '。');
+  }
+  if (health.stale) {
+    problems.push('磁盘上的代码比服务启动时间新，正在运行的仍是更新前的代码。');
+  }
+  return problems;
+}
+
+function showVersionBanner(problems) {
+  if (!problems || !problems.length) return;
+  let banner = document.getElementById('version-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'version-banner';
+    banner.className = 'version-banner';
+    banner.setAttribute('role', 'alert');
+    banner.addEventListener('click', function (event) {
+      const action = event.target.closest('[data-version-action]');
+      if (!action) return;
+      if (action.getAttribute('data-version-action') === 'reload') location.reload();
+      else banner.remove();
+    });
+    document.body.appendChild(banner);
+  }
+  banner.innerHTML =
+    '<div class="version-banner-copy">' +
+    '<strong>前后端版本不一致，部分操作会失败</strong>' +
+    '<span>' + problems.map(esc).join(' ') + ' 请重启 AgentTrail 服务，再按 Ctrl+F5 强制刷新页面。</span>' +
+    '</div>' +
+    '<div class="version-banner-actions">' +
+    '<button type="button" class="btn btn-secondary btn-sm" data-version-action="reload">重新加载</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" data-version-action="dismiss">关闭</button>' +
+    '</div>';
+}
+
+async function checkBackendVersion() {
+  let health = null;
+  try {
+    health = await api.get('/api/health', { silent: true });
+  } catch (error) {
+    health = null;
+  }
+  const problems = versionProblems(health);
+  if (problems.length) console.warn('[AgentTrail] 版本校验失败：', problems.join(' '), health);
+  showVersionBanner(problems);
+}
+
 async function init() {
   hydrateIcons(document);
   bindGlobalEvents();
   if (!location.hash) history.replaceState(null, '', '#/overview');
+  checkBackendVersion();
   try {
     const authStatus = await api.get('/api/auth/status', { silent: true });
     if (!authStatus || !authStatus.authenticated) {
