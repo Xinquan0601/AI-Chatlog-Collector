@@ -23,6 +23,7 @@ from chatvault.db import (
     list_agents,
     migrate_agent_roots,
 )
+from chatvault.collectors import Source, collect_source, discover_sources
 from chatvault.exporting import create_export, estimate_export
 from chatvault.importing import preview, run_import
 from chatvault.ingestion import import_batch, refresh_session_aggregates
@@ -711,6 +712,215 @@ class LegacyImportTests(unittest.TestCase):
             ).fetchone()
         self.assertIsNotNone(row)
         self.assertEqual(json.loads(row["metadata_json"])["reasoning"], True)
+
+
+ZCODE_SQLITE_SCHEMA = """
+CREATE TABLE session (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    workspace_id TEXT,
+    parent_id TEXT,
+    slug TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    path TEXT,
+    title TEXT NOT NULL,
+    version TEXT NOT NULL,
+    time_created INTEGER NOT NULL,
+    time_updated INTEGER NOT NULL
+);
+CREATE TABLE message (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    time_created INTEGER NOT NULL,
+    time_updated INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    sequence INTEGER
+);
+CREATE TABLE part (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    time_created INTEGER NOT NULL,
+    time_updated INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    sequence INTEGER
+);
+CREATE TABLE model_usage (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+class ZCodeCollectorTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp.name) / "db.sqlite"
+        self._make_database()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _make_database(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executescript(ZCODE_SQLITE_SCHEMA)
+            conn.execute(
+                "INSERT INTO session(id, project_id, parent_id, slug, directory, title, version,"
+                " time_created, time_updated) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    "ses_zc", "proj_z", None, "ses_zc", "C:/Users/Administrator/Desktop/proj-z",
+                    "排查采集失败", "0.16.5", 1786000000000, 1786000060000,
+                ),
+            )
+            messages = [
+                ("msg_u", 1786000000000, 1786000000000, 1, {"role": "user", "time": {"created": 1786000000000}}),
+                ("msg_a1", 1786000001000, 1786000004000, 2, {
+                    "role": "assistant", "time": {"created": 1786000001000, "completed": 1786000004000},
+                    "modelID": "glm-5.2", "tokens": {"input": 120, "output": 30},
+                }),
+                ("msg_a2", 1786000005000, 1786000006000, 3, {
+                    "role": "assistant", "time": {"created": 1786000005000},
+                    "modelID": "glm-5.2", "tokens": {"input": 80, "output": 12},
+                }),
+            ]
+            conn.executemany(
+                "INSERT INTO message(id, session_id, time_created, time_updated, sequence, data)"
+                " VALUES (?,?,?,?,?,?)",
+                [
+                    (message_id, "ses_zc", created, updated, sequence, json.dumps(data, ensure_ascii=False))
+                    for message_id, created, updated, sequence, data in messages
+                ],
+            )
+            parts = [
+                ("part_u1", "msg_u", 1786000000000, 0, {
+                    "type": "text", "text": "帮我检查采集失败的原因", "time": {"start": 1786000000000},
+                }),
+                ("part_u2", "msg_u", 1786000000000, 1, {
+                    "type": "file", "filename": "trace.log", "mime": "text/plain", "url": "C:/tmp/trace.log",
+                }),
+                ("part_a1r", "msg_a1", 1786000001000, 0, {
+                    "type": "reasoning", "text": "先看数据目录", "time": {"start": 1786000001000},
+                }),
+                ("part_a1t", "msg_a1", 1786000002000, 1, {
+                    "type": "text", "text": "我先列出数据目录。", "time": {"start": 1786000002000},
+                }),
+                ("part_a1c", "msg_a1", 1786000003000, 2, {
+                    "type": "tool", "callID": "call_ok", "tool": "Bash",
+                    "state": {
+                        "status": "completed", "input": {"command": "ls -la"},
+                        "output": "a.txt\nb.txt", "time": {"start": 1786000003000, "end": 1786000004000},
+                    },
+                }),
+                ("part_a1f", "msg_a1", 1786000004000, 3, {"type": "step-finish", "reason": "tool-calls"}),
+                ("part_a2c", "msg_a2", 1786000005000, 0, {
+                    "type": "tool", "callID": "call_err", "tool": "Read",
+                    "state": {
+                        "status": "error", "input": {"file_path": "C:/tmp/missing.md"},
+                        "error": "File does not exist", "time": {"start": 1786000005000, "end": 1786000006000},
+                    },
+                }),
+            ]
+            conn.executemany(
+                "INSERT INTO part(id, message_id, session_id, time_created, time_updated, sequence, data)"
+                " VALUES (?,?,?,?,?,?,?)",
+                [
+                    (part_id, message_id, "ses_zc", created, created, sequence, json.dumps(data, ensure_ascii=False))
+                    for part_id, message_id, created, sequence, data in parts
+                ],
+            )
+            conn.execute(
+                "INSERT INTO model_usage(id, session_id, input_tokens, output_tokens) VALUES (?,?,?,?)",
+                ("usage_1", "ses_zc", 200, 42),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _collect(self, state=None):
+        stat = self.db_path.stat()
+        return collect_source("zcode", Source(str(self.db_path), "sqlite", stat.st_size, stat.st_mtime_ns), state)
+
+    def test_sqlite_source_maps_four_event_types(self):
+        batch, cursor = self._collect()
+        self.assertEqual(batch["agent_key"], "zcode")
+        self.assertEqual(batch["errors"], [])
+        self.assertEqual(len(batch["sessions"]), 1)
+        session = batch["sessions"][0]
+        self.assertEqual(session["external_id"], "ses_zc")
+        self.assertEqual(session["title"], "排查采集失败")
+        self.assertEqual(session["model"], "glm-5.2")
+        self.assertEqual(session["cwd"], "C:/Users/Administrator/Desktop/proj-z")
+        self.assertEqual(session["project"], "proj-z")
+        self.assertEqual(session["tokens_input"], 200)
+        self.assertEqual(session["tokens_output"], 42)
+
+        events = batch["events"]
+        self.assertEqual(
+            [event["type"] for event in events],
+            [
+                "user_message", "assistant_message", "assistant_message",
+                "tool_call", "tool_result", "tool_call", "tool_result",
+            ],
+        )
+        user = events[0]
+        self.assertEqual(user["content"], "帮我检查采集失败的原因")
+        self.assertIn("trace.log", user["metadata_json"])
+        reasoning = events[1]
+        self.assertEqual(json.loads(reasoning["metadata_json"]), {"reasoning": True})
+        self.assertEqual(reasoning["model"], "glm-5.2")
+        self.assertEqual(reasoning["tokens_input"], 120)
+        self.assertEqual(events[2]["tokens_input"], None)
+        call = events[3]
+        self.assertEqual(call["tool_name"], "Bash")
+        self.assertEqual(call["tool_call_id"], "call_ok")
+        self.assertEqual(json.loads(call["tool_input_json"]), {"command": "ls -la"})
+        self.assertEqual(events[4]["tool_call_id"], "call_ok")
+        self.assertEqual(events[4]["content"], "a.txt\nb.txt")
+        self.assertEqual(events[4]["tool_status"], "success")
+        self.assertEqual(events[6]["tool_status"], "error")
+        self.assertEqual(events[6]["content"], "File does not exist")
+        self.assertEqual(cursor["updated_ms"], 1786000006000)
+
+    def test_incremental_cursor_skips_unchanged_rows(self):
+        _, cursor = self._collect()
+        second, second_cursor = self._collect(cursor)
+        self.assertEqual(second["events"], [])
+        self.assertEqual(second["sessions"], [])
+        self.assertEqual(second_cursor, cursor)
+
+    def test_late_tool_completion_updates_existing_event(self):
+        _, cursor = self._collect()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            raw = conn.execute("SELECT data FROM part WHERE id = 'part_a2c'").fetchone()[0]
+            data = json.loads(raw)
+            data["state"].pop("error", None)
+            data["state"].update({
+                "status": "completed", "output": "late output",
+                "time": {"start": 1786000005000, "end": 1786000070000},
+            })
+            conn.execute(
+                "UPDATE part SET data = ?, time_updated = ? WHERE id = 'part_a2c'",
+                (json.dumps(data, ensure_ascii=False), 1786000070000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        updated, updated_cursor = self._collect(cursor)
+        results = {event["source_event_id"]: event for event in updated["events"] if event["type"] == "tool_result"}
+        self.assertIn("call_err:result", results)
+        self.assertEqual(results["call_err:result"]["tool_status"], "success")
+        self.assertEqual(results["call_err:result"]["content"], "late output")
+        self.assertEqual(updated_cursor["updated_ms"], 1786000070000)
+
+    def test_discovery_finds_zcode_database_in_directory_root(self):
+        agent = {"key": "zcode", "config": {"roots": [self.temp.name], "patterns": ["*.jsonl", "*.json"]}}
+        sources, _ = discover_sources(agent)
+        self.assertEqual([Path(item.path).name for item in sources], ["db.sqlite"])
+        self.assertEqual(sources[0].source_type, "sqlite")
 
 
 if __name__ == "__main__":

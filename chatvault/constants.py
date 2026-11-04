@@ -132,13 +132,13 @@ AGENT_DEFINITIONS = [
         "key": "zcode",
         "name": "ZCode",
         "vendor": "ZCode",
-        "description": "通过通用消息适配器接入 ZCode 的 JSON / JSONL 会话目录。",
+        "description": "以只读方式接入 ZCode 的 db.sqlite，并兼容通用 JSON / JSONL 会话目录。",
         "color": "#a03a76",
         "icon": "code",
-        "adapter": "generic",
-        "default_roots": ["~/.zcode/sessions", "~/.zcode/projects"],
+        "adapter": "zcode",
+        "default_roots": ["~/.zcode/cli/db", "~/.zcode/sessions", "~/.zcode/projects"],
         "patterns": ["*.jsonl", "*.json"],
-        "format": "JSON / JSONL · generic",
+        "format": "SQLite · JSON / JSONL",
     },
 ]
 

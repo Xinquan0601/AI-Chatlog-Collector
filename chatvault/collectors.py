@@ -121,6 +121,13 @@ def discover_sources(agent: dict[str, Any]) -> tuple[list[Source], list[str]]:
             for candidate in root.glob("opencode.db"):
                 add(candidate)
             continue
+        if key == "zcode":
+            # ZCode stores its archive in cli/db/db.sqlite. Accept the database
+            # directory itself (the default root) or a parent such as ~/.zcode,
+            # then keep scanning for the legacy JSON / JSONL experiments.
+            for pattern in ("db.sqlite", "*/db.sqlite", "*/*/db.sqlite"):
+                for candidate in root.glob(pattern):
+                    add(candidate)
         if key == "vscodecopilot":
             # workspaceStorage/<hash>/chatSessions/<uuid>.jsonl plus the
             # global emptyWindowChatSessions folder.
@@ -464,9 +471,362 @@ def collect_opencode_source(source: Source, state: dict[str, Any] | None) -> tup
     return result, next_cursor
 
 
+# ---------------------------------------------------------------------------
+# ZCode SQLite adapter
+# ---------------------------------------------------------------------------
+
+# ZCode keeps its archive in cli/db/db.sqlite and reuses the OpenCode v1
+# layout: the message table stores the envelope, the part table stores text /
+# reasoning / tool fragments.
+_ZCODE_REQUIRED_TABLES = ("session", "message", "part")
+_ZCODE_CHUNK = 300
+
+
+def _zcode_value(row: sqlite3.Row, key: str) -> Any:
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return None
+
+
+def _zcode_json_object(raw: Any) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _zcode_text(value: Any) -> str:
+    """Normalize a ZCode payload value (string / block list / object) to text."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        from .utils import text_from_blocks
+        text = text_from_blocks(value)
+        if text:
+            return text
+    return safe_json(value) or str(value)
+
+
+def _zcode_model(data: dict[str, Any]) -> str | None:
+    for key in ("modelID", "modelId"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    model = data.get("model")
+    if isinstance(model, dict):
+        for key in ("modelID", "id", "name"):
+            value = model.get(key)
+            if isinstance(value, str) and value:
+                return value
+    elif isinstance(model, str) and model:
+        return model
+    return None
+
+
+def collect_zcode_source(source: Source, state: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Read the ZCode SQLite archive (session / message / part).
+
+    Only messages (or parts) whose time_updated moved past the stored cursor are
+    re-read; event fingerprints make the overlap idempotent, so a tool that
+    completes after its call updates the existing tool_result instead of adding
+    a duplicate.
+    """
+    path = Path(source.path)
+    cursor = dict(state or {})
+    last_updated = int(cursor.get("updated_ms") or 0)
+    uri_path = path.as_posix().replace("?", "%3F").replace("#", "%23")
+
+    from .parsers import ParsedBatch, _derive_title_from_events, _is_injected_user_text
+
+    fallback = _now_iso_from_ns(int(source.mtime_ns or 0)) if source.mtime_ns else utc_now()
+    batch = ParsedBatch("zcode", source.path, fallback, path.stem)
+    next_updated = last_updated
+    usage_cache: dict[str, tuple[int, int]] = {}
+
+    try:
+        conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=20)
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"无法只读打开 ZCode 数据库 {path.name}：{exc}") from exc
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = [name for name in _ZCODE_REQUIRED_TABLES if name not in tables]
+        if missing:
+            raise RuntimeError(
+                "未识别的 ZCode 数据库结构（缺少 %s 表）。请确认数据源指向 ZCode 的 db.sqlite。"
+                % " / ".join(missing)
+            )
+        has_usage = "model_usage" in tables
+
+        message_ids: set[str] = set()
+        for row in conn.execute(
+            """SELECT id FROM message WHERE time_updated > ?
+               UNION
+               SELECT message_id FROM part WHERE time_updated > ?""",
+            (last_updated, last_updated),
+        ):
+            if row[0]:
+                message_ids.add(str(row[0]))
+
+        def emit_message(session_id: str, message_row: sqlite3.Row, part_rows: list[sqlite3.Row]) -> None:
+            data = _zcode_json_object(message_row["message_data"])
+            if data is None:
+                batch.errors.append(f"message {message_row['message_id']}: invalid JSON")
+                return
+            role = str(data.get("role") or "")
+            if role not in {"user", "assistant"}:
+                return
+            message_id = str(message_row["message_id"])
+            message_sequence = int(message_row["message_sequence"] or 0)
+            created = data.get("time") if isinstance(data.get("time"), dict) else {}
+            timestamp = created.get("created") or message_row["message_time_created"]
+            model = _zcode_model(data)
+            tokens = data.get("tokens") if isinstance(data.get("tokens"), dict) else {}
+            pending_tokens: tuple[int | None, int | None] = (
+                int(tokens["input"]) if isinstance(tokens.get("input"), (int, float)) else None,
+                int(tokens["output"]) if isinstance(tokens.get("output"), (int, float)) else None,
+            )
+
+            def take_tokens() -> tuple[int | None, int | None]:
+                nonlocal pending_tokens
+                value, pending_tokens = pending_tokens, (None, None)
+                return value
+
+            if role == "user":
+                texts: list[str] = []
+                attachments: list[dict[str, Any]] = []
+                for row in part_rows:
+                    part = _zcode_json_object(row["part_data"])
+                    if part is None:
+                        continue
+                    part_type = str(part.get("type") or "")
+                    if part_type == "text":
+                        text = part.get("text")
+                        if isinstance(text, str) and text.strip():
+                            texts.append(text.strip())
+                    elif part_type == "file":
+                        attachments.append({
+                            "filename": part.get("filename"),
+                            "mime": part.get("mime"),
+                            "url": part.get("url"),
+                        })
+                text = "\n\n".join(texts).strip()
+                if text and not _is_injected_user_text(text):
+                    batch.event(
+                        session_id, "user_message",
+                        source_event_id=f"{message_id}:text",
+                        timestamp=timestamp,
+                        content=text,
+                        metadata={"attachments": attachments} if attachments else None,
+                        raw=data,
+                        sequence=message_sequence * 100_000,
+                    )
+                return
+
+            for index, row in enumerate(part_rows):
+                part = _zcode_json_object(row["part_data"])
+                if part is None:
+                    continue
+                part_type = str(part.get("type") or "")
+                part_id = str(row["part_id"] or f"{message_id}:part:{index}")
+                part_sequence = row["part_sequence"]
+                if part_sequence is None:
+                    part_sequence = index
+                base_sequence = message_sequence * 100_000 + int(part_sequence) * 10
+                part_time = part.get("time") if isinstance(part.get("time"), dict) else {}
+                part_timestamp = part_time.get("start") or row["part_time_created"] or timestamp
+
+                if part_type == "text":
+                    text = part.get("text")
+                    content = text.strip() if isinstance(text, str) else ""
+                    if not content:
+                        continue
+                    tokens_input, tokens_output = take_tokens()
+                    batch.event(
+                        session_id, "assistant_message",
+                        source_event_id=part_id,
+                        timestamp=part_timestamp,
+                        content=content,
+                        model=model,
+                        tokens_input=tokens_input,
+                        tokens_output=tokens_output,
+                        raw=part,
+                        sequence=base_sequence,
+                    )
+                elif part_type == "reasoning":
+                    text = part.get("text")
+                    content = text.strip() if isinstance(text, str) else ""
+                    if not content:
+                        continue
+                    tokens_input, tokens_output = take_tokens()
+                    batch.event(
+                        session_id, "assistant_message",
+                        source_event_id=part_id,
+                        timestamp=part_timestamp,
+                        content=content,
+                        model=model,
+                        tokens_input=tokens_input,
+                        tokens_output=tokens_output,
+                        metadata={"reasoning": True},
+                        raw=part,
+                        sequence=base_sequence,
+                    )
+                elif part_type == "tool":
+                    state_data = part.get("state") if isinstance(part.get("state"), dict) else {}
+                    call_id = str(part.get("callID") or part.get("id") or f"{message_id}:tool:{index}")
+                    tool_name = str(part.get("tool") or "unknown")
+                    status = str(state_data.get("status") or "pending")
+                    state_time = state_data.get("time") if isinstance(state_data.get("time"), dict) else {}
+                    call_time = state_time.get("start") or part_timestamp
+                    title = state_data.get("title")
+                    tokens_input, tokens_output = take_tokens()
+                    batch.event(
+                        session_id, "tool_call",
+                        source_event_id=f"{call_id}:call",
+                        timestamp=call_time,
+                        tool_name=tool_name,
+                        tool_call_id=call_id,
+                        tool_status=status,
+                        tool_input=state_data.get("input"),
+                        model=model,
+                        tokens_input=tokens_input,
+                        tokens_output=tokens_output,
+                        metadata={"title": title} if title else None,
+                        raw=part,
+                        sequence=base_sequence,
+                    )
+                    output_text = _zcode_text(state_data.get("output"))
+                    if not output_text and state_data.get("error") is not None:
+                        output_text = _zcode_text(state_data.get("error"))
+                    if output_text or status in {"completed", "error", "failed"}:
+                        is_error = status in {"error", "failed"}
+                        batch.event(
+                            session_id, "tool_result",
+                            source_event_id=f"{call_id}:result",
+                            timestamp=state_time.get("end") or call_time,
+                            content=output_text,
+                            tool_name=tool_name,
+                            tool_call_id=call_id,
+                            tool_status="error" if is_error else "success",
+                            metadata={"is_error": True} if is_error else None,
+                            raw=part,
+                            sequence=base_sequence + 1,
+                        )
+
+        if message_ids:
+            ids = sorted(message_ids)
+            sessions_by_id: dict[str, list[str]] = {}
+            for start in range(0, len(ids), _ZCODE_CHUNK):
+                chunk = ids[start:start + _ZCODE_CHUNK]
+                placeholders = ",".join("?" for _ in chunk)
+                for row in conn.execute(
+                    f"SELECT id, session_id FROM message WHERE id IN ({placeholders})", chunk
+                ):
+                    sessions_by_id.setdefault(str(row["session_id"]), []).append(str(row["id"]))
+
+            for session_id in sorted(sessions_by_id):
+                info = conn.execute("SELECT * FROM session WHERE id = ?", (session_id,)).fetchone()
+                if info is not None:
+                    usage = usage_cache.get(session_id)
+                    if usage is None:
+                        usage = (0, 0)
+                        if has_usage:
+                            totals = conn.execute(
+                                """SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+                                   FROM model_usage WHERE session_id = ?""",
+                                (session_id,),
+                            ).fetchone()
+                            usage = (int(totals[0] or 0), int(totals[1] or 0))
+                        usage_cache[session_id] = usage
+                    batch.session(
+                        session_id,
+                        title=_zcode_value(info, "title") or "",
+                        cwd=_zcode_value(info, "directory") or None,
+                        started_at=_zcode_value(info, "time_created"),
+                        ended_at=_zcode_value(info, "time_updated"),
+                        tokens_input=usage[0],
+                        tokens_output=usage[1],
+                        metadata={
+                            "slug": _zcode_value(info, "slug"),
+                            "parent_id": _zcode_value(info, "parent_id"),
+                            "version": _zcode_value(info, "version"),
+                        },
+                    )
+
+                session_message_ids = sessions_by_id[session_id]
+                for start in range(0, len(session_message_ids), _ZCODE_CHUNK):
+                    chunk = session_message_ids[start:start + _ZCODE_CHUNK]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = conn.execute(
+                        f"""SELECT m.id AS message_id, m.time_created AS message_time_created,
+                                   m.time_updated AS message_time_updated,
+                                   m.sequence AS message_sequence, m.data AS message_data,
+                                   p.id AS part_id, p.sequence AS part_sequence,
+                                   p.time_created AS part_time_created,
+                                   p.time_updated AS part_time_updated, p.data AS part_data
+                            FROM message m LEFT JOIN part p ON p.message_id = m.id
+                            WHERE m.id IN ({placeholders})
+                            ORDER BY m.sequence, m.time_created, m.id, p.sequence""",
+                        chunk,
+                    ).fetchall()
+                    current_id: str | None = None
+                    current_row: sqlite3.Row | None = None
+                    part_rows: list[sqlite3.Row] = []
+                    for row in rows:
+                        next_updated = max(
+                            next_updated,
+                            int(row["message_time_updated"] or 0),
+                            int(row["part_time_updated"] or 0),
+                        )
+                        if row["message_id"] != current_id:
+                            if current_row is not None:
+                                emit_message(session_id, current_row, part_rows)
+                            current_id = row["message_id"]
+                            current_row = row
+                            part_rows = []
+                        if row["part_id"]:
+                            part_rows.append(row)
+                    if current_row is not None:
+                        emit_message(session_id, current_row, part_rows)
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError(
+            f"读取 ZCode 数据库失败（{exc}）。请确认数据源是 ZCode 的 db.sqlite，"
+            "且没有被 ZCode 独占锁定；稍后可重试。"
+        ) from exc
+    finally:
+        conn.close()
+
+    result = batch.finalize()
+    for session in result["sessions"]:
+        if not session.get("title") or session["title"].startswith("zcode ·"):
+            session["title"] = _derive_title_from_events(
+                result["events"], session["external_id"], "ZCode", session.get("project")
+            )
+    next_cursor = {
+        "updated_ms": next_updated,
+        "size": source.size_bytes,
+        "mtime_ns": source.mtime_ns,
+        "done": True,
+    }
+    return result, next_cursor
+
+
+SQLITE_COLLECTORS = {
+    "opencode": collect_opencode_source,
+    "zcode": collect_zcode_source,
+}
+
+
 def collect_source(agent_key: str, source: Source, state: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
     if source.source_type == "sqlite":
-        if agent_key != "opencode":
+        collector = SQLITE_COLLECTORS.get(agent_key)
+        if collector is None:
             raise RuntimeError(f"{agent_key} 暂不支持 SQLite 来源")
-        return collect_opencode_source(source, state)
+        return collector(source, state)
     return collect_file_source(agent_key, source, state)

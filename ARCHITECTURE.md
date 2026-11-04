@@ -58,7 +58,7 @@ flowchart TB
         CC[Claude/WorkBuddy]
         OC[OpenCode DB]
         DS[DSH zstd]
-        ZC[ZCode Generic]
+        ZC[ZCode SQLite]
     end
     DB[(SQLite WAL)]
     FS[(Data / Backups / Export temp)]
@@ -360,12 +360,16 @@ queued / running ──> interrupted（服务重启时回收）
 
 **ZCode**
 
-- 通用适配器：
-  - 顶层 `messages` 数组 → 会话；
-  - 单条 `role + content` 记录；
-  - OpenAI 风格 `tool_calls`；
-  - 内容 blocks 中的 `tool_use / tool_result`。
-- JSON 文件若实际是 JSONL，会自动回退逐行解析。
+- 主来源是 `~/.zcode/cli/db/db.sqlite`，以 `mode=ro` 只读打开；WAL 模式下 `db.sqlite-wal` 由 SQLite 自动读取，未落盘的会话不会漏采。
+- 表结构与 OpenCode v1 相近：`session` 存会话元数据，`message` 存消息信封（含 `tokens` / `modelID`），`part` 存 text / reasoning / tool 片段。
+- 事件映射：
+  - 一条 user message 的多个 `text` part 合并为一条 user_message，`file` part 记入 `metadata.attachments`；
+  - `text` → assistant_message；`reasoning` → assistant_message（`metadata.reasoning = true`）；
+  - `tool` → tool_call；`state.status` 为 completed / error / failed 或存在 output / error 时，再生成一条 tool_result（`tool_call_id = callID`）；
+  - `step-start / step-finish / snapshot / patch / timeline / compaction` 跳过。
+- 增量条件：`message.time_updated` 或 `part.time_updated` 大于游标；命中后整条消息重读，fingerprint 去重，因此工具后补的 output 会更新原 tool_result。
+- 会话 token 取 `model_usage` 按 `session_id` 汇总（含重试消耗）；缺少该表时回退到消息 `data.tokens`。
+- 仍保留通用 JSON / JSONL 适配器，用于接入导出的实验性会话目录。
 
 **VS Code Copilot**
 
@@ -410,7 +414,7 @@ cursor.offset = N + cut
 
 ### 6.3 SQLite
 
-保存 `updated_ms`。每次查询时间戳大于游标的消息；更新同一消息时取最新内容。初次同步从 0 开始。
+保存 `updated_ms`。每次查询时间戳大于游标的消息；更新同一消息时取最新内容。初次同步从 0 开始。OpenCode（`session_message`）与 ZCode（`message` + `part`）共用该策略，ZCode 额外把 `part.time_updated` 纳入游标判定。
 
 ### 6.4 指纹生成
 

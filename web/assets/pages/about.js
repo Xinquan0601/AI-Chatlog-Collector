@@ -9,7 +9,7 @@ const ADAPTERS = [
   { key: 'workbuddy', name: 'WorkBuddy', source: '~/.workbuddy/projects/**/*.jsonl', format: 'CodeBuddy JSONL', mapping: 'message / user / assistant + tool blocks' },
   { key: 'deepseekharness', name: 'DeepSeek Harness', source: '~/.dsh/sessions/**/session.v4.jsonl.zstd', format: 'v4 event stream · zstd', mapping: 'user/message · assistant/message · tool/result' },
   { key: 'vscodecopilot', name: 'VS Code Copilot', source: '%APPDATA%/Code/User/**/chatSessions/*.jsonl', format: 'chat session JSONL', mapping: 'kind 0/1/2/3 patch replay · requests[] · toolInvocationSerialized' },
-  { key: 'zcode', name: 'ZCode', source: '~/.zcode/sessions/**/*.json(l)', format: 'generic JSON / JSONL', mapping: 'role/content · tool_calls · tool_use / tool_result' }
+  { key: 'zcode', name: 'ZCode', source: '~/.zcode/cli/db/db.sqlite · sessions/**/*.json(l)', format: 'SQLite (read-only) · generic JSON', mapping: 'session + message + part · text / reasoning / tool · model_usage' }
 ];
 
 export async function render(params, token, signal) {

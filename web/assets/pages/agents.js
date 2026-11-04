@@ -10,7 +10,7 @@ const FORMATS = {
   opencode: 'SQLite · read-only',
   workbuddy: 'JSONL · projects',
   deepseekharness: 'JSONL · zstd',
-  zcode: 'JSON / JSONL',
+  zcode: 'SQLite · read-only',
   vscodecopilot: 'JSONL · workspaceStorage'
 };
 

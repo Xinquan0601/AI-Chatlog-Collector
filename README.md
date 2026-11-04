@@ -11,7 +11,7 @@
 
 ## 1. 这是什么
 
-不同的 AI 编程 Agent 把会话写在不同的位置、不同的格式里：Codex 是 rollout JSONL，Claude Code / WorkBuddy 是 projects JSONL，OpenCode 是 SQLite，DeepSeek Harness 是追加式 zstd JSONL，ZCode 是通用 JSON / JSONL。
+不同的 AI 编程 Agent 把会话写在不同的位置、不同的格式里：Codex 是 rollout JSONL，Claude Code / WorkBuddy 是 projects JSONL，OpenCode 是 SQLite，DeepSeek Harness 是追加式 zstd JSONL，ZCode 是 `cli/db/db.sqlite` 里的 SQLite 存档。
 
 **迹录**把这些记录集中到一个本地 SQLite 档案库中。它只读访问原始文件，将每条记录规范化为：
 
@@ -143,7 +143,7 @@ flowchart LR
         OC[OpenCode SQLite]
         WB[WorkBuddy JSONL]
         DS[DeepSeek Harness zstd]
-        ZC[ZCode JSON/JSONL]
+        ZC[ZCode SQLite]
     end
     subgraph Collector["采集适配层"]
         REG[Adapter Registry]
@@ -263,7 +263,7 @@ data/                       # 运行时数据库、备份、日志（gitignore�
 | OpenCode | `~/.local/share/opencode/opencode.db`、`~/.local/share/opencode-linux/opencode.db` | SQLite 只读 | `session_v2` + `session_message`；从 assistant content blocks 提取工具及结果 |
 | WorkBuddy | `~/.workbuddy/projects` | projects JSONL | 兼容 CodeBuddy 消息结构；顶层 `function_call / function_call_result` 映射为工具链；清理 `<system-reminder>`，提取 `<user_query>` |
 | DeepSeek Harness | `~/.dsh/sessions` | `session.v4.jsonl.zstd` | `user/message`、`assistant/message`、`tool/result`；流式解压所有 zstd frame |
-| ZCode | `~/.zcode/sessions`、`~/.zcode/projects` | JSON / JSONL | `role/content`、`tool_calls`、`tool_use` / `tool_result`，支持嵌套 `messages` 文档 |
+| ZCode | `~/.zcode/cli/db`、`~/.zcode/sessions`、`~/.zcode/projects` | SQLite 只读（兼容 JSON / JSONL） | `session` + `message` + `part`：`text` → 消息、`reasoning` → 带 reasoning 标记的消息、`tool` → tool_call / tool_result；`model_usage` 汇总 token |
 | VS Code Copilot | `~/AppData/Roaming/Code/User/workspaceStorage`、`.../globalStorage/emptyWindowChatSessions` | JSONL 会话日志 | 回放 `kind 0/1/2/3` 快照与增量补丁，提取 `requests[].message`、响应文本、`toolInvocationSerialized` 工具调用与结果 |
 
 路径支持 `~`、`%APPDATA%`、`$HOME` 等环境变量，可在 Agent 配置中覆盖为任意兼容目录。
@@ -280,7 +280,7 @@ data/                       # 运行时数据库、备份、日志（gitignore�
 | OpenCode（本机数据） | `~/.local/share/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` |
 | VS Code Copilot | `%APPDATA%/Code/User/workspaceStorage`、`globalStorage/emptyWindowChatSessions` | `~/AppData/Roaming/Code/User/...`（Windows） |
 | WorkBuddy | `C:/Users/Administrator/.workbuddy/projects` | `~/.workbuddy/projects` |
-| ZCode | `~/.zcode/sessions`、`~/.zcode/projects` | `~/.zcode/sessions`、`~/.zcode/projects` |
+| ZCode | `~/.zcode/cli/db`、`~/.zcode/sessions` | `~/.zcode/cli/db`、`~/.zcode/sessions`、`~/.zcode/projects` |
 
 规则：
 
@@ -560,7 +560,7 @@ python -m unittest discover -s tests -v
 - Codex rollout、event_msg 兜底与重复消除
 - Claude Code / WorkBuddy 的 tool_use / tool_result 与注入上下文清理
 - DeepSeek Harness 事件流
-- ZCode 通用 JSON / JSONL
+- ZCode SQLite（session / message / part）与通用 JSON / JSONL 兼容路径
 - 事件级去重与会话聚合
 - 统计、分页、CSV / ZIP 导出
 - 密码认证、会话令牌、角色
