@@ -186,7 +186,13 @@ def import_batch(conn: sqlite3.Connection, agent_key: str, batch: dict[str, Any]
                 "ended_at": event.get("timestamp"),
             })
             sessions_by_external[external_sid] = session_id
-        prepared.append((event, session_id, event_fingerprint(agent_key, external_sid, event)))
+        # Archive imports carry the fingerprint computed by the source machine.
+        # Reusing it keeps cross-machine merges idempotent: rows that already
+        # exist locally under the same identity are treated as duplicates.
+        fingerprint = str(event.get("fingerprint") or "").strip() or event_fingerprint(
+            agent_key, external_sid, event
+        )
+        prepared.append((event, session_id, fingerprint))
 
     existing_map = _prefetch_events(conn, [fingerprint for _, _, fingerprint in prepared])
 

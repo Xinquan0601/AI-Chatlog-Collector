@@ -1,16 +1,18 @@
-"""Import sessions from an old chatlog export database.
+"""Import sessions from a chatlog export database or an AgentTrail archive.
 
-The previous tool ("chatlog") exported everything into a single SQLite file
-with two tables:
+Two source kinds share one intake:
 
-    sessions(session_pk, source, session_id, project_path, title, ...)
-    messages(row_id, session_pk, seq, role, is_reasoning, text,
-             tool, tool_status, tool_input, tool_output, ...)
+* chatlog (legacy) - the previous tool exported everything into a single SQLite
+  file with sessions(session_pk, source, session_id, ...) and messages(row_id,
+  session_pk, seq, role, text, ...).  It is opened read-only with SQLite URI
+  mode=ro&immutable=1 and mapped onto the normalized model.
+* archive - this collector's own export (ZIP bundle, CSV, JSONL or JSON),
+  produced on another machine.  Events carry their original fingerprint, so a
+  merge only inserts records that are not in the local archive yet, and records
+  that exist on both machines are counted as duplicates.
 
-This module maps that schema onto AgentTrail's normalized model.  It never
-writes to the export file: the source is opened read-only with SQLite URI
-mode=ro&immutable=1, and every session is imported through the regular
-ingestion pipeline so fingerprints keep the operation idempotent.
+Both paths write through the regular ingestion pipeline, which keeps the whole
+operation idempotent and recomputes session aggregates after every batch.
 """
 
 from __future__ import annotations
@@ -19,11 +21,13 @@ import os
 import sqlite3
 import threading
 import time
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .constants import DB_PATH
+from . import archive as archive_io
+from .constants import DB_PATH, EVENT_TYPES
 from .db import connection, log_system
 from .ingestion import import_batch
 from .utils import clean_user_text, json_dumps, json_loads, shorten, utc_now
@@ -57,6 +61,11 @@ class ImportSourceError(RuntimeError):
 
 class _Cancelled(Exception):
     pass
+
+
+def detect_import_kind(path: str | os.PathLike[str]) -> str:
+    """Pick the reader for an intake file: own archive or legacy chatlog DB."""
+    return "archive" if archive_io.is_archive_file(path) else "legacy"
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +156,21 @@ def _json_input(value: Any) -> str | None:
 # Preview
 # ---------------------------------------------------------------------------
 
-def preview(path: str | os.PathLike[str]) -> dict[str, Any]:
-    """Return what the export contains and how it maps onto current agents."""
+def preview(
+    path: str | os.PathLike[str],
+    db_path: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    """Return what the export contains and how it maps onto the local archive."""
+    if detect_import_kind(path) == "archive":
+        try:
+            with connection(db_path) as conn:
+                return archive_io.preview(path, conn)
+        except archive_io.ArchiveError as exc:
+            raise ImportSourceError(str(exc)) from exc
+    return _preview_legacy(path)
+
+
+def _preview_legacy(path: str | os.PathLike[str]) -> dict[str, Any]:
     source = Path(path).expanduser()
     conn = open_export(source)
     try:
@@ -216,6 +238,7 @@ def preview(path: str | os.PathLike[str]) -> dict[str, Any]:
             warnings.append(f"来源 {old_source} 没有对应的 Agent，导入时会跳过")
 
     return {
+        "kind": "legacy",
         "path": str(source),
         "name": source.name,
         "size_bytes": source.stat().st_size,
@@ -230,9 +253,15 @@ def preview(path: str | os.PathLike[str]) -> dict[str, Any]:
 
 
 def candidate_exports(db_path: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
-    """Find chatlog export files next to the archive so the UI can offer them."""
+    """Find intake files next to the archive so the UI can offer them.
+
+    Both legacy chatlog databases and this collector's ZIP bundles (dropped in
+    the data directory after copying them over from another machine) are
+    listed; the UI picks the preview layout from the returned kind.
+    """
     base = Path(db_path or DB_PATH).parent
-    found: list[Path] = []
+    legacy: list[Path] = []
+    archives: list[Path] = []
     if base.exists():
         for candidate in base.rglob("*.db"):
             try:
@@ -242,9 +271,14 @@ def candidate_exports(db_path: str | os.PathLike[str] | None = None) -> list[dic
                 continue
             if "backups" in candidate.parts:
                 continue
-            found.append(candidate)
+            legacy.append(candidate)
+        for candidate in base.glob("*.zip"):
+            if "backups" in candidate.parts:
+                continue
+            archives.append(candidate)
+
     items: list[dict[str, Any]] = []
-    for path in sorted(found, key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)[:20]:
+    for path in legacy:
         try:
             conn = sqlite3.connect(_sqlite_uri(path), uri=True, timeout=5)
             try:
@@ -262,6 +296,7 @@ def candidate_exports(db_path: str | os.PathLike[str] | None = None) -> list[dic
         except OSError:
             continue
         items.append({
+            "kind": "legacy",
             "path": str(path),
             "name": path.name,
             "size_bytes": path.stat().st_size,
@@ -269,7 +304,35 @@ def candidate_exports(db_path: str | os.PathLike[str] | None = None) -> list[dic
             "messages": int(messages or 0),
             "modified_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
         })
-    return items
+
+    for path in archives:
+        try:
+            with zipfile.ZipFile(path) as bundle:
+                names = set(bundle.namelist())
+                if "events.csv" not in names:
+                    continue
+                manifest: dict[str, Any] = {}
+                if "manifest.json" in names:
+                    try:
+                        manifest = json_loads(bundle.read("manifest.json").decode("utf-8", "replace"), {}) or {}
+                    except (OSError, ValueError):
+                        manifest = {}
+        except (zipfile.BadZipFile, OSError):
+            continue
+        counts = manifest.get("counts") if isinstance(manifest.get("counts"), dict) else {}
+        items.append({
+            "kind": "archive",
+            "path": str(path),
+            "name": path.name,
+            "size_bytes": path.stat().st_size,
+            "sessions": int(counts.get("sessions") or 0),
+            "messages": int(counts.get("events") or 0),
+            "events": int(counts.get("events") or 0),
+            "modified_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+        })
+
+    items.sort(key=lambda item: item["modified_at"], reverse=True)
+    return items[:20]
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +638,170 @@ def run_import(
 
 
 # ---------------------------------------------------------------------------
+# Archive merge (exports written on another machine)
+# ---------------------------------------------------------------------------
+
+ARCHIVE_BATCH_EVENTS = 1500
+
+
+def run_archive_import(
+    path: str | os.PathLike[str],
+    *,
+    dry_run: bool = False,
+    progress: ProgressFn | None = None,
+    cancel: CancelFn | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    """Merge an AgentTrail export into the local archive.
+
+    Every event is matched by the fingerprint computed on the source machine,
+    so overlapping records are counted as duplicates and only records that are
+    missing locally are inserted.  Batches run through import_batch, which also
+    refreshes session aggregates and keeps the operation idempotent.
+    """
+    source = str(Path(path).expanduser())
+    counters: dict[str, Any] = {
+        "kind": "archive",
+        "format": None,
+        "events_total": 0,
+        "events_seen": 0,
+        "events_inserted": 0,
+        "events_updated": 0,
+        "duplicates": 0,
+        "sessions_seen": 0,
+        "sessions_merged": 0,
+        "skipped": 0,
+        "unknown_agents": 0,
+        "by_agent": {},
+        "by_type": {item: 0 for item in EVENT_TYPES},
+        "errors": [],
+        "warnings": [],
+        "dry_run": bool(dry_run),
+        "started_at": utc_now(),
+    }
+    with connection(db_path) as conn:
+        known_agents = {row["key"] for row in conn.execute("SELECT key FROM agents")}
+
+    touched: set[tuple[str, str]] = set()
+    preexisting: dict[tuple[str, str], bool] = {}
+    pending: dict[str, list[dict[str, Any]]] = {}
+    processed = 0
+    last_progress = 0.0
+
+    def note(message: str) -> None:
+        if len(counters["warnings"]) < MAX_WARNINGS:
+            counters["warnings"].append(message)
+
+    def flush(agent_key: str, bundle: archive_io.Bundle) -> None:
+        events = pending.pop(agent_key, [])
+        if not events:
+            return
+        sessions: list[dict[str, Any]] = []
+        seen_sessions: set[tuple[str, str]] = set()
+        for event in events:
+            key = (agent_key, str(event["session_external_id"]))
+            if key in seen_sessions:
+                continue
+            seen_sessions.add(key)
+            meta = bundle.sessions.get(key)
+            if meta:
+                sessions.append(meta)
+        unresolved = [key for key in seen_sessions if key not in preexisting]
+        if unresolved:
+            # Resolve session overlap before this batch writes anything, so a
+            # session created by an earlier batch still counts as new.
+            with connection(db_path) as conn:
+                known = archive_io.existing_session_keys(conn, set(unresolved))
+            for key in unresolved:
+                preexisting[key] = key in known
+        batch = {
+            "agent_key": agent_key,
+            "source_path": source,
+            "sessions": sessions,
+            "events": events,
+            "errors": [],
+        }
+        try:
+            if dry_run:
+                with connection(db_path) as conn:
+                    existing = archive_io.existing_fingerprints(
+                        conn, [str(item["fingerprint"]) for item in events]
+                    )
+                for item in events:
+                    if str(item["fingerprint"]) in existing:
+                        counters["duplicates"] += 1
+                    else:
+                        counters["events_inserted"] += 1
+            else:
+                with connection(db_path) as conn:
+                    stats = import_batch(conn, agent_key, batch)
+                counters["events_inserted"] += stats["events_inserted"]
+                counters["events_updated"] += stats["events_updated"]
+                counters["duplicates"] += stats["duplicates"]
+        except Exception as exc:  # noqa: BLE001 - keep merging the remaining batches
+            if len(counters["errors"]) < MAX_ERRORS:
+                counters["errors"].append(f"{agent_key}: {type(exc).__name__}: {exc}")
+
+    with archive_io.open_bundle(path) as bundle:
+        counters["format"] = bundle.kind
+        counters["events_total"] = bundle.expected_events
+        total = counters["events_total"]
+        for raw in bundle.iter_events():
+            if cancel and cancel():
+                for agent_key in list(pending):
+                    flush(agent_key, bundle)
+                raise _Cancelled()
+            event, error = archive_io.normalize_event(raw)
+            if event is None:
+                counters["skipped"] += 1
+                note(error or "无法解析的事件")
+                continue
+            agent_key = event.pop("agent_key")
+            if agent_key not in known_agents:
+                counters["unknown_agents"] += 1
+                note(f"本机没有 Agent「{agent_key}」，导入时会跳过")
+                continue
+            processed += 1
+            counters["events_seen"] = processed
+            counters["by_type"][event["type"]] = counters["by_type"].get(event["type"], 0) + 1
+            entry = counters["by_agent"].setdefault(
+                agent_key, {"events": 0, "inserted": 0, "duplicates": 0}
+            )
+            entry["events"] += 1
+            touched.add((agent_key, str(event["session_external_id"])))
+            pending.setdefault(agent_key, []).append(event)
+            if len(pending[agent_key]) >= ARCHIVE_BATCH_EVENTS:
+                before_inserted = counters["events_inserted"]
+                before_duplicates = counters["duplicates"]
+                flush(agent_key, bundle)
+                entry["inserted"] += counters["events_inserted"] - before_inserted
+                entry["duplicates"] += counters["duplicates"] - before_duplicates
+            now = time.monotonic()
+            if progress and (now - last_progress >= 0.5 or processed % 500 == 0):
+                last_progress = now
+                progress(processed, total, f"已处理 {processed} 条事件")
+        for agent_key in list(pending):
+            before_inserted = counters["events_inserted"]
+            before_duplicates = counters["duplicates"]
+            flush(agent_key, bundle)
+            entry = counters["by_agent"].setdefault(
+                agent_key, {"events": 0, "inserted": 0, "duplicates": 0}
+            )
+            entry["inserted"] += counters["events_inserted"] - before_inserted
+            entry["duplicates"] += counters["duplicates"] - before_duplicates
+        counters["events_total"] = max(counters["events_total"], counters["events_seen"])
+
+        counters["sessions_seen"] = len(touched)
+        counters["sessions_merged"] = sum(1 for key in touched if preexisting.get(key))
+        if progress:
+            progress(processed, counters["events_total"], f"已处理 {processed} 条事件")
+
+    counters["finished_at"] = utc_now()
+    counters["source_label"] = Path(source).name
+    return counters
+
+
+# ---------------------------------------------------------------------------
 # Run records + background manager
 # ---------------------------------------------------------------------------
 
@@ -619,6 +846,7 @@ def list_runs(conn: sqlite3.Connection, limit: int = 20) -> list[dict[str, Any]]
 def _serialize_run(row: sqlite3.Row) -> dict[str, Any]:
     data = dict(row)
     data["options"] = json_loads(data.pop("options_json", None), {})
+    data["kind"] = str(data["options"].get("kind") or "legacy")
     data["summary"] = json_loads(data.pop("summary_json", None), {}) or {}
     data["errors"] = json_loads(data.pop("errors_json", None), []) or []
     data["warnings"] = json_loads(data.pop("warnings_json", None), []) or []
@@ -666,8 +894,17 @@ class ImportManager:
             return None
 
     def start(self, path: str, options: dict[str, Any], user: str | None) -> tuple[int | None, str | None]:
-        probe = open_export(path)
-        probe.close()
+        kind = detect_import_kind(path)
+        try:
+            if kind == "archive":
+                with archive_io.open_bundle(path):
+                    pass
+            else:
+                probe = open_export(path)
+                probe.close()
+        except archive_io.ArchiveError as exc:
+            raise ImportSourceError(str(exc)) from exc
+        options = {**options, "kind": kind}
         with self._lock:
             if self._thread and self._thread.is_alive():
                 return None, "已有导入任务正在执行"
@@ -695,22 +932,27 @@ class ImportManager:
                 return
             options = json_loads(run["options_json"], {}) or {}
             start_cursor = int(run["cursor_session_pk"] or 0)
+            kind = str(options.get("kind") or detect_import_kind(run["source_path"]))
             conn.execute(
                 "UPDATE import_runs SET status = 'running', started_at = ?, updated_at = ? WHERE id = ?",
                 (utc_now(), utc_now(), run_id),
             )
             conn.commit()
-        probe = open_export(run["source_path"])
-        try:
-            total_sessions = int(probe.execute(
-                "SELECT COUNT(*) FROM sessions WHERE session_pk > ?", (start_cursor,)
-            ).fetchone()[0] or 0)
-        finally:
-            probe.close()
+        if kind == "archive":
+            with archive_io.open_bundle(run["source_path"]) as bundle:
+                total_units = bundle.expected_events
+        else:
+            probe = open_export(run["source_path"])
+            try:
+                total_units = int(probe.execute(
+                    "SELECT COUNT(*) FROM sessions WHERE session_pk > ?", (start_cursor,)
+                ).fetchone()[0] or 0)
+            finally:
+                probe.close()
         with connection(self._db_path) as conn:
             conn.execute(
                 "UPDATE import_runs SET total_sessions = ?, updated_at = ? WHERE id = ?",
-                (total_sessions, utc_now(), run_id),
+                (total_units, utc_now(), run_id),
             )
             conn.commit()
         last_flush = {"at": 0.0}
@@ -727,47 +969,82 @@ class ImportManager:
                 )
 
         try:
-            result = run_import(
-                run["source_path"],
-                include_reasoning=bool(options.get("include_reasoning")),
-                dry_run=bool(options.get("dry_run")),
-                cursor_session_pk=start_cursor,
-                progress=progress,
-                cancel=self._cancel.is_set,
-                db_path=self._db_path,
-            )
-            status = "partial" if result["errors"] else "success"
-            with connection(self._db_path) as conn:
-                update_run(
-                    conn, run_id,
-                    status=status,
-                    total_sessions=int(result.get("sessions_total") or 0),
-                    processed_sessions=int(result.get("sessions_total") or 0),
-                    imported_sessions=int(result["sessions_imported"]),
-                    skipped_sessions=int(result["sessions_skipped"]),
-                    imported_events=int(result["events_inserted"]),
-                    duplicate_events=int(result["duplicates"]),
-                    skipped_messages=int(result["skipped_reasoning"]) + int(result["skipped_empty"]),
-                    cursor_session_pk=int(result["cursor_session_pk"]),
-                    errors_json=json_dumps(result["errors"]),
-                    warnings_json=json_dumps(result["warnings"]),
-                    summary_json=json_dumps(result),
-                    finished_at=utc_now(),
+            if kind == "archive":
+                result = run_archive_import(
+                    run["source_path"],
+                    dry_run=bool(options.get("dry_run")),
+                    progress=progress,
+                    cancel=self._cancel.is_set,
+                    db_path=self._db_path,
                 )
-                log_system(
-                    conn, "info" if status == "success" else "warning", "import",
-                    f"旧数据导入完成：{result['sessions_imported']} 个会话",
-                    {"run_id": run_id, "path": run["source_path"], "stats": {
-                        "sessions": result["sessions_imported"],
-                        "events": result["events_inserted"],
-                        "duplicates": result["duplicates"],
-                    }},
+                status = "partial" if result["errors"] else "success"
+                with connection(self._db_path) as conn:
+                    update_run(
+                        conn, run_id,
+                        status=status,
+                        total_sessions=int(result["events_total"] or result["events_seen"]),
+                        processed_sessions=int(result["events_seen"]),
+                        total_messages=int(result["sessions_seen"]),
+                        imported_sessions=int(result["sessions_merged"]),
+                        imported_events=int(result["events_inserted"]),
+                        duplicate_events=int(result["duplicates"]),
+                        skipped_messages=int(result["skipped"]) + int(result["unknown_agents"]),
+                        errors_json=json_dumps(result["errors"]),
+                        warnings_json=json_dumps(result["warnings"]),
+                        summary_json=json_dumps(result),
+                        finished_at=utc_now(),
+                    )
+                    log_system(
+                        conn, "info" if status == "success" else "warning", "import",
+                        f"档案包合并完成：新增 {result['events_inserted']} 条，去重 {result['duplicates']} 条",
+                        {"run_id": run_id, "path": run["source_path"], "stats": {
+                            "events": result["events_inserted"],
+                            "duplicates": result["duplicates"],
+                            "sessions": result["sessions_seen"],
+                        }},
+                    )
+            else:
+                result = run_import(
+                    run["source_path"],
+                    include_reasoning=bool(options.get("include_reasoning")),
+                    dry_run=bool(options.get("dry_run")),
+                    cursor_session_pk=start_cursor,
+                    progress=progress,
+                    cancel=self._cancel.is_set,
+                    db_path=self._db_path,
                 )
+                status = "partial" if result["errors"] else "success"
+                with connection(self._db_path) as conn:
+                    update_run(
+                        conn, run_id,
+                        status=status,
+                        total_sessions=int(result.get("sessions_total") or 0),
+                        processed_sessions=int(result.get("sessions_total") or 0),
+                        imported_sessions=int(result["sessions_imported"]),
+                        skipped_sessions=int(result["sessions_skipped"]),
+                        imported_events=int(result["events_inserted"]),
+                        duplicate_events=int(result["duplicates"]),
+                        skipped_messages=int(result["skipped_reasoning"]) + int(result["skipped_empty"]),
+                        cursor_session_pk=int(result["cursor_session_pk"]),
+                        errors_json=json_dumps(result["errors"]),
+                        warnings_json=json_dumps(result["warnings"]),
+                        summary_json=json_dumps(result),
+                        finished_at=utc_now(),
+                    )
+                    log_system(
+                        conn, "info" if status == "success" else "warning", "import",
+                        f"旧数据导入完成：{result['sessions_imported']} 个会话",
+                        {"run_id": run_id, "path": run["source_path"], "stats": {
+                            "sessions": result["sessions_imported"],
+                            "events": result["events_inserted"],
+                            "duplicates": result["duplicates"],
+                        }},
+                    )
         except _Cancelled:
             with connection(self._db_path) as conn:
                 update_run(
                     conn, run_id, status="canceled", finished_at=utc_now(),
-                    warnings_json=json_dumps(["导入被手动取消，可在原进度继续"]),
+                    warnings_json=json_dumps(["导入被手动取消，已写入的部分保留；重新执行会按指纹去重"]),
                 )
         except Exception as exc:  # noqa: BLE001 - surface the failure in the run record
             with connection(self._db_path) as conn:
@@ -775,7 +1052,7 @@ class ImportManager:
                     conn, run_id, status="failed", finished_at=utc_now(),
                     errors_json=json_dumps([f"{type(exc).__name__}: {exc}"]),
                 )
-                log_system(conn, "error", "import", "旧数据导入失败", {"run_id": run_id, "error": str(exc)})
+                log_system(conn, "error", "import", "数据导入失败", {"run_id": run_id, "error": str(exc)})
 
 
 _manager = ImportManager()

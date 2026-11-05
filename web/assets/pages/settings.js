@@ -52,7 +52,7 @@ function draw(settingsData, usersData, signal) {
     '<div class="field full"><div class="inline-switch"><div class="inline-switch-copy"><strong>启用自动备份</strong><span>调度器按间隔创建 SQLite 一致性快照。</span></div><label class="switch"><input id="setting-auto-backup" type="checkbox"' + (settings.auto_backup_enabled ? ' checked' : '') + '><span></span></label></div></div>' +
     '<div class="field"><label class="field-label" for="setting-backup-interval">备份间隔（小时）</label><input class="input" id="setting-backup-interval" type="number" min="1" max="168" value="' + Number(settings.backup_interval_hours || 24) + '"></div>' +
     '<div class="field"><label class="field-label" for="setting-backup-retention">保留备份数量</label><input class="input" id="setting-backup-retention" type="number" min="1" max="30" value="' + Number(settings.backup_retention || 7) + '"></div>' +
-    '<div class="field"><label class="field-label" for="setting-export-max">单次导出行数上限</label><input class="input" id="setting-export-max" type="number" min="1000" max="1000000" step="1000" value="' + Number(settings.export_max_rows || 200000) + '"></div>' +
+    '<div class="field"><label class="field-label" for="setting-export-max">单次导出行数上限（0 = 不限制）</label><input class="input" id="setting-export-max" type="number" min="0" max="1000000" step="1000" value="' + Number(settings.export_max_rows == null ? 0 : settings.export_max_rows) + '"><p class="field-help">0 表示不限制，导出全部命中记录；正数上限最大 1,000,000。</p></div>' +
     '<div class="field"><label class="field-label">数据保留策略</label><div class="input" style="display:flex;align-items:center;color:var(--muted);font-size:11px">永久保留 · 不做自动清理</div></div>' +
     '</div><div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">' + icon('save') + '<span>保存备份设置</span></button></div></form></div></section>';
 
@@ -161,7 +161,7 @@ function draw(settingsData, usersData, signal) {
           auto_backup_enabled: root.querySelector('#setting-auto-backup').checked,
           backup_interval_hours: Number(root.querySelector('#setting-backup-interval').value),
           backup_retention: Number(root.querySelector('#setting-backup-retention').value),
-          export_max_rows: Number(root.querySelector('#setting-export-max').value)
+          export_max_rows: Math.max(0, Number(root.querySelector('#setting-export-max').value) || 0)
         });
       }
     }, { signal: sig });

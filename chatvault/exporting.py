@@ -54,6 +54,8 @@ def _event_rows(
     params: list[Any],
     limit: int,
 ) -> Iterable[sqlite3.Row]:
+    # A limit <= 0 exports everything (SQLite spells "no limit" as -1).
+    bound = int(limit) if int(limit) > 0 else -1
     return conn.execute(
         f"""SELECT e.id, e.agent_key, e.session_id, e.type, e.source_event_id, e.sequence,
                    e.timestamp, e.content, e.tool_name, e.tool_call_id, e.tool_status,
@@ -65,7 +67,7 @@ def _event_rows(
             WHERE {where_sql}
             ORDER BY COALESCE(e.timestamp,e.created_at), e.session_id, e.sequence, e.id
             LIMIT ?""",
-        (*params, limit),
+        (*params, bound),
     )
 
 
@@ -263,7 +265,7 @@ def create_export(
     q: str | None = None,
     session_id: int | None = None,
     project: str | None = None,
-    max_rows: int = 200_000,
+    max_rows: int = 0,
     requested_by: str | None = None,
 ) -> dict[str, Any]:
     start, end = resolve_time_range(None, start, end)
@@ -272,7 +274,7 @@ def create_export(
     total = conn.execute(
         f"SELECT COUNT(*) FROM events e JOIN sessions s ON s.id=e.session_id WHERE {where_sql}", params
     ).fetchone()[0]
-    if total > max_rows:
+    if max_rows > 0 and total > max_rows:
         raise ExportTooLarge(
             f"导出记录数为 {total:,}，超过上限 {max_rows:,}，请缩小时间范围或增加筛选条件。"
         )
@@ -307,8 +309,18 @@ def create_export(
                 for row in rows:
                     handle.write(json.dumps(_event_dict(row), ensure_ascii=False, separators=(",", ":")) + "\n")
         elif format == "json":
-            data = {"manifest": manifest, "events": [_event_dict(row) for row in rows]}
-            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            # Stream the events array so a full export never sits in memory.
+            with path.open("w", encoding="utf-8", newline="\n") as handle:
+                handle.write('{"manifest": ')
+                json.dump(manifest, handle, ensure_ascii=False, indent=2)
+                handle.write(', "events": [')
+                first = True
+                for row in rows:
+                    handle.write("," if not first else "")
+                    handle.write("\n")
+                    handle.write(json.dumps(_event_dict(row), ensure_ascii=False, separators=(",", ":")))
+                    first = False
+                handle.write("\n]}\n" if not first else "]}\n")
         elif format == "bundle":
             _write_bundle(path, conn, where_sql, params, rows, manifest)
         else:
@@ -341,6 +353,8 @@ DATA_DICTIONARY = """# AgentTrail 导出数据字典
 | summary.json | 按 Agent 与事件类型的汇总。 |
 | manifest.json | 导出筛选条件、生成时间和记录数。 |
 | data_dictionary.md | 本说明文件。 |
+
+以 `= + - @` 开头的文本单元格会加一个 `'` 前缀，避免表格软件将其当作公式执行；AgentTrail 导入时会自动去掉该前缀，正文不受影响。只导出单文件 CSV / JSONL / JSON 时不含 sessions.csv，会话摘要需使用 ZIP 分析包。
 
 ## events.csv 字段
 

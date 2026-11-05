@@ -947,9 +947,10 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _export_estimate(self, conn: sqlite3.Connection) -> None:
         filters = self._export_filters()
         result = estimate_export(conn, **filters)
-        limit = int(get_settings(conn).get("export_max_rows") or 200000)
+        limit = int(get_settings(conn).get("export_max_rows") or 0)
         result["limit"] = limit
-        result["exceeded"] = result["total"] > limit
+        result["unlimited"] = limit <= 0
+        result["exceeded"] = limit > 0 and result["total"] > limit
         result["filters"] = {
             "agents": filters["agents"],
             "from": filters["start"],
@@ -970,7 +971,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             exported = create_export(
                 conn,
                 format=fmt,
-                max_rows=int(settings.get("export_max_rows") or 200000),
+                max_rows=int(settings.get("export_max_rows") or 0),
                 requested_by=self.user.get("username") if self.user else None,
                 **filters,
             )
@@ -1021,7 +1022,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not target:
             raise APIError(400, "bad_request", "请提供导出文件路径")
         try:
-            data = preview_import(target)
+            data = preview_import(target, db_path=self.db_path)
         except ImportSourceError as exc:
             raise APIError(400, "bad_source", str(exc))
         except OSError as exc:
@@ -1101,7 +1102,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if "default_page_size" in updates:
             updates["default_page_size"] = max(5, min(100, updates["default_page_size"]))
         if "export_max_rows" in updates:
-            updates["export_max_rows"] = max(1000, min(1_000_000, updates["export_max_rows"]))
+            # 0 (or less) means "no limit"; otherwise keep a sane ceiling.
+            value = int(updates["export_max_rows"])
+            updates["export_max_rows"] = 0 if value <= 0 else min(1_000_000, value)
         if "auto_retry_attempts" in updates:
             updates["auto_retry_attempts"] = max(1, min(10, updates["auto_retry_attempts"]))
         if "timezone" in updates and len(updates["timezone"]) > 64:

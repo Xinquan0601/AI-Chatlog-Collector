@@ -371,7 +371,7 @@ export async function render(params, token, signal) {
             '<li>同一组多选内部为「或」（任一命中即可），不同组之间为「且」（必须同时满足）。</li>' +
             '<li>导出结果按事件时间、会话、序号排序；会话表只包含命中事件所在的会话。</li>' +
             '<li>分析包（ZIP）包含 events.csv、sessions.csv、summary.json、manifest.json、data_dictionary.md，manifest 会记录本次的 Agent、日期与类型条件。</li>' +
-            '<li>命中行数受「单次导出行数上限」约束（默认 200,000 行）；超限时导出按钮禁用，需缩小日期范围、Agent 或消息类型。</li>' +
+            '<li>默认导出全部命中记录，不设行数上限；如在设置页配置了上限，超限时导出按钮禁用，需缩小日期范围、Agent 或消息类型。</li>' +
           '</ul>' +
         '</article>' +
       '</div>' +
@@ -651,7 +651,7 @@ function renderSummary(root, st) {
     } else if (estimate.exceeded) {
       summary.classList.add('warn');
       summary.innerHTML = '<span class="export-summary-dot"></span><span>命中 <b>' + num(estimate.total) +
-        '</b> 条，超过上限 <b>' + num(estimate.limit) + '</b> 条，需缩小范围后才能导出。</span>';
+        '</b> 条，超过设置的上限 <b>' + num(estimate.limit) + '</b> 条，需缩小范围或调高上限。</span>';
     } else {
       summary.classList.remove('warn');
       summary.innerHTML = '<span class="export-summary-dot"></span><span>将导出 <b>' + num(estimate.total) +
@@ -665,7 +665,7 @@ function renderSummary(root, st) {
       metric('事件', estimate ? num(total) : '—'),
       metric('会话', estimate ? num(estimate.sessions) : '—'),
       metric('体积', estimate ? bytes(estimate.bytes) : '—'),
-      metric('上限', estimate && estimate.limit ? num(estimate.limit) : '—')
+      metric('上限', estimate ? (estimate.limit ? num(estimate.limit) : '无限制') : '—')
     ].join('');
   }
 
@@ -688,11 +688,14 @@ function renderSummary(root, st) {
   }
 
   if (limit) {
-    if (estimate && estimate.limit) {
+    if (!estimate) {
+      limit.hidden = true;
+    } else if (estimate.limit) {
       limit.hidden = false;
       limit.textContent = '单次导出行数上限：' + num(estimate.limit) + ' 条';
     } else {
-      limit.hidden = true;
+      limit.hidden = false;
+      limit.textContent = '单次导出不限行数，将包含全部命中记录';
     }
   }
 }

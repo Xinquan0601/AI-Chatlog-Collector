@@ -17,7 +17,7 @@ const RUN_STATUS = {
 let chosenPath = '';
 
 export async function render(params, token, signal) {
-  setView(skeletonPage('旧数据导入'));
+  setView(skeletonPage('数据导入'));
   try {
     const results = await Promise.all([
       api.get('/api/import/candidates'),
@@ -52,12 +52,16 @@ function draw(candidates, runsData, token, signal) {
     chosenPath = (activeRun && activeRun.source_path) || (runs[0] && runs[0].source_path) || (items[0] && items[0].path) || '';
   }
   const sourceRows = items.length ? items.map(function (item) {
+    const archive = item.kind === 'archive';
+    const meta = archive
+      ? num(item.events || item.messages) + ' 条事件 · ' + num(item.sessions) + ' 个会话'
+      : num(item.sessions) + ' 个会话 · ' + num(item.messages) + ' 条消息';
     return '<label class="intake-source' + (item.path === chosenPath ? ' active' : '') + '">' +
       '<input type="radio" name="intake-file" value="' + attr(item.path) + '"' + (item.path === chosenPath ? ' checked' : '') + '>' +
       '<div class="intake-source-body"><div class="intake-source-name">' + esc(item.name) + '</div>' +
-      '<div class="intake-source-meta">' + num(item.sessions) + ' 个会话 · ' + num(item.messages) + ' 条消息 · ' + bytes(item.size_bytes) + ' · ' + relTime(item.modified_at) + '</div></div>' +
-      '<span class="tag accent">预览</span></label>';
-  }).join('') : '<p class="field-help">data/ 目录下没有发现 chatlog 导出库，可以直接填写文件路径。</p>';
+      '<div class="intake-source-meta">' + meta + ' · ' + bytes(item.size_bytes) + ' · ' + relTime(item.modified_at) + '</div></div>' +
+      '<span class="tag ' + (archive ? 'accent' : 'neutral') + '">' + (archive ? '档案包' : '旧库') + '</span></label>';
+  }).join('') : '<p class="field-help">data/ 目录下没有发现可导入的文件（.db 旧库或 .zip 档案包），可以直接填写文件路径。</p>';
 
   const runRows = runs.length ? runs.map(function (run) {
     const busy = run.status === 'queued' || run.status === 'running';
@@ -67,11 +71,16 @@ function draw(candidates, runsData, token, signal) {
     const action = busy
       ? '<button class="btn btn-ghost btn-xs" data-import-cancel="' + run.id + '">取消</button>'
       : '<button class="btn btn-ghost btn-xs" data-import-rerun="' + run.id + '">重新导入</button>';
+    const archive = run.kind === 'archive';
+    const kindTag = '<span class="tag ' + (archive ? 'accent' : 'neutral') + '">' + (archive ? '档案包' : '旧库') + '</span> ';
+    const counts = busy ? progress : (archive
+      ? '<span class="mono">' + num(run.imported_events) + ' 条事件</span><div class="cell-sub">' + num(run.imported_sessions) + ' 个会话合并</div>'
+      : '<span class="mono">' + num(run.imported_sessions) + ' 会话</span><div class="cell-sub">' + num(run.imported_events) + ' 事件</div>');
     return '<tr><td><span class="mono dim">#' + run.id + '</span></td>' +
-      '<td><div class="cell-main" title="' + attr(run.source_path) + '">' + esc(run.source_label || run.source_path) + '</div>' +
+      '<td><div class="cell-main" title="' + attr(run.source_path) + '">' + kindTag + esc(run.source_label || run.source_path) + '</div>' +
       '<div class="cell-sub">' + fmtDate(run.created_at) + '</div></td>' +
       '<td>' + runBadge(run.status) + '</td>' +
-      '<td>' + (busy ? progress : '<span class="mono">' + num(run.imported_sessions) + ' 会话</span><div class="cell-sub">' + num(run.imported_events) + ' 事件</div>') + detail + '</td>' +
+      '<td>' + counts + detail + '</td>' +
       '<td><span class="mono">' + num(run.duplicate_events) + '</span><div class="cell-sub">去重跳过</div></td>' +
       '<td><div class="cell-main">' + fmtDuration(run.started_at, run.finished_at) + '</div><div class="cell-sub">' + esc(run.created_by || '—') + '</div></td>' +
       '<td class="cell-actions">' + action + '</td></tr>';
@@ -79,34 +88,35 @@ function draw(candidates, runsData, token, signal) {
 
   const busy = activeRun && (activeRun.status === 'queued' || activeRun.status === 'running');
   const header = pageHead({
-    eyebrow: 'ARCHIVE INTAKE / LEGACY CHATLOG',
-    title: '旧数据导入',
-    subtitle: '把旧版 chatlog 导出库中的会话迁入当前档案库。导入按旧库行号生成指纹，重复执行只会补齐新增内容。',
+    eyebrow: 'ARCHIVE INTAKE / MERGE',
+    title: '数据导入',
+    subtitle: '把旧版 chatlog 导出库或另一台机器导出的 AgentTrail 档案包并入当前档案库。事件按 fingerprint 去重，重复导入只补齐缺失记录。',
     actions: '<button class="btn btn-ghost btn-sm" data-import-refresh>' + icon('refresh') + '<span>刷新</span></button>'
   });
 
   const html = '<div class="page">' + header +
     '<div class="backup-hero"><div class="backup-hero-icon">' + icon('upload') + '</div>' +
-    '<div class="backup-hero-copy"><h2>入库登记台</h2><p>选择旧工具导出的 .db 文件，先预览来源与规模，再决定是否同时导入推理片段。导入在后台线程执行，可以随时取消；已写入的会话不会重复。</p></div>' +
+    '<div class="backup-hero-copy"><h2>入库登记台</h2><p>选择旧工具导出的 .db 旧库，或另一台机器导出的 .zip 档案包；先预览会带来多少新增、多少重复，再开始合并。任务在后台执行，可随时取消，重复执行不会产生副本。</p></div>' +
     '<div class="backup-actions"><span class="tag">' + (items.length ? items.length + ' 个候选文件' : '手动指定路径') + '</span></div></div>' +
-    '<div class="intake-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">来源文件</h2><p class="panel-sub">自动发现 data/ 下的导出库，也可以填写绝对路径。</p></div><span class="badge neutral">SQLite</span></div>' +
+    '<div class="intake-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">来源文件</h2><p class="panel-sub">自动发现 data/ 下的 .db 旧库与 .zip 档案包，也可以填写绝对路径。</p></div><span class="badge neutral">SQLite / ZIP</span></div>' +
     '<div class="panel-body"><div class="intake-sources" id="intake-candidates">' + sourceRows + '</div>' +
-    '<form class="intake-path" id="intake-path-form"><input class="input" id="intake-path" placeholder="D:/.../chatlog-export.db" value="' + attr(chosenPath) + '" spellcheck="false">' +
+    '<form class="intake-path" id="intake-path-form"><input class="input" id="intake-path" placeholder="D:/.../chatlog-export.db 或 agenttrail-20261103.zip" value="' + attr(chosenPath) + '" spellcheck="false">' +
     '<button class="btn btn-secondary btn-sm" type="submit">' + icon('search') + '<span>预览</span></button></form>' +
-    '<p class="field-help">只读取导出库，不会修改源文件。仅支持包含 sessions 与 messages 表的 chatlog 导出格式。</p></div></section>' +
+    '<p class="field-help">只读取源文件，不会修改它。支持 chatlog 的 sessions / messages 库，以及本工具导出的 ZIP / CSV / JSONL / JSON 档案包。</p></div></section>' +
     '<aside class="panel"><div class="panel-head"><div><h2 class="panel-title">导入选项</h2><p class="panel-sub">选项在启动时固定，重新导入会沿用上次设置。</p></div></div>' +
-    '<div class="panel-body"><div class="inline-switch"><div class="inline-switch-copy"><strong>同时导入推理过程</strong><span>旧库中共 26,862 条推理片段，默认跳过；开启后会作为带 reasoning 标记的助手消息写入。</span></div><label class="switch"><input id="intake-reasoning" type="checkbox"><span></span></label></div>' +
-    '<div class="inline-switch"><div class="inline-switch-copy"><strong>预演模式</strong><span>只统计将要写入的会话与事件，不落库，用于确认映射是否正确。</span></div><label class="switch"><input id="intake-dry-run" type="checkbox"><span></span></label></div>' +
+    '<div class="panel-body"><div class="inline-switch" id="intake-reasoning-field"><div class="inline-switch-copy"><strong>同时导入推理过程</strong><span>仅对旧版 chatlog 旧库有效：推理片段默认跳过，开启后会作为带 reasoning 标记的助手消息写入。</span></div><label class="switch"><input id="intake-reasoning" type="checkbox"><span></span></label></div>' +
+    '<div class="inline-switch"><div class="inline-switch-copy"><strong>预演模式</strong><span>只统计将要写入的事件与会话，不落库，用于确认合并范围是否正确。</span></div><label class="switch"><input id="intake-dry-run" type="checkbox"><span></span></label></div>' +
     '<div class="form-actions"><button class="btn btn-primary btn-sm" data-import-start' + (busy ? ' disabled' : '') + '>' + icon('play') + '<span>' + (busy ? '导入进行中' : '开始导入') + '</span></button></div>' +
     '<div id="intake-progress">' + (activeRun ? progressHtml(activeRun) : '') + '</div>' +
-    '<p class="field-help">来源映射：opencode-local 与 opencode-linux 合并进 opencode，vscodecopilot 独立接入；未知来源会被跳过并记入警告。</p></div></aside></div>' +
+    '<p class="field-help">档案包按 fingerprint 与本地记录比对：相同的记为重复，只写入缺失的事件；本机没有对应 Agent 的记录会跳过并记入警告。</p></div></aside></div>' +
     '<section class="panel" id="intake-preview-panel" hidden></section>' +
     '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">导入记录</h2><p class="panel-sub">最近 12 次导入，包含预演与中断记录。</p></div></div>' +
     '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>会话 / 事件</th><th>去重</th><th>耗时</th><th></th></tr></thead><tbody>' + runRows + '</tbody></table></div></section>' +
-    '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">入库规则</h2><p class="panel-sub">迁移只做格式转换，不重写消息内容。</p></div></div><div class="panel-body"><div class="flow-steps">' +
-    '<div class="flow-step"><span>01 SELECT</span><strong>选择导出库</strong><p>读取 export_meta 与 sessions 表，确认来源与规模。</p></div>' +
+    '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">入库规则</h2><p class="panel-sub">两种来源都走同一套幂等入库流程，不重写消息内容。</p></div></div><div class="panel-body"><div class="flow-steps">' +
+    '<div class="flow-step"><span>01 SELECT</span><strong>识别来源</strong><p>读取文件头与 manifest，区分旧库还是档案包，并确认规模。</p></div>' +
     '<div class="flow-step"><span>02 MAP</span><strong>映射来源</strong><p>旧 source 映射到当前 Agent，子会话与项目路径保留在元数据里。</p></div>' +
-    '<div class="flow-step"><span>03 DEDUPE</span><strong>按行号去重</strong><p>以旧库 row_id 作为事件指纹，重复导入不会产生副本。</p></div>' +
+    '<div class="flow-step"><span>03 DEDUPE</span><strong>按指纹去重</strong><p>旧库以 row_id、档案包以导出时的 fingerprint 比对，重复导入不会产生副本。</p></div>' +
+    '<div class="flow-step"><span>04 MERGE</span><strong>合并聚合</strong><p>会话标题、项目与 token 取已有与来源的有效值，事件数与会话统计自动重算。</p></div>' +
     '</div></div></section></div>';
 
   setView(html, function (root, sig) {
@@ -140,6 +150,8 @@ function draw(candidates, runsData, token, signal) {
       try {
         const data = await api.get('/api/import/preview?path=' + encodeURIComponent(chosenPath));
         if (!isCurrent(token)) return;
+        const reasoningField = root.querySelector('#intake-reasoning-field');
+        if (reasoningField) reasoningField.style.display = data.kind === 'archive' ? 'none' : '';
         previewPanel.innerHTML = previewHtml(data);
       } catch (error) {
         previewPanel.innerHTML = '<div class="panel-head"><div><h2 class="panel-title">来源预览</h2><p class="panel-sub">读取失败</p></div></div>' +
@@ -206,7 +218,54 @@ function draw(candidates, runsData, token, signal) {
   });
 }
 
+function archivePreviewHtml(data) {
+  const totals = data.totals || {};
+  const agents = data.by_agent || [];
+  const filters = data.filters || {};
+  const formatLabels = { bundle: 'ZIP 档案包', csv: 'CSV', jsonl: 'JSONL', json: 'JSON' };
+  const meta = [];
+  if (data.format) meta.push(formatLabels[data.format] || data.format);
+  if (data.exported_at) meta.push('导出于 ' + relTime(data.exported_at));
+  if (totals.skipped) meta.push(num(totals.skipped) + ' 条无法解析');
+  if (totals.unknown_agents) meta.push(num(totals.unknown_agents) + ' 条 Agent 不匹配');
+
+  const filterBits = [];
+  if (filters.agents && filters.agents.length) filterBits.push('Agent：' + filters.agents.join('、'));
+  if (filters.from || filters.to) {
+    filterBits.push('时间：' + (filters.from ? fmtDate(filters.from) : '不限') + ' — ' + (filters.to ? fmtDate(filters.to) : '不限'));
+  }
+  if (filters.q) filterBits.push('关键词：' + filters.q);
+  const filterLine = filterBits.length ? '<p class="intake-note">来源筛选 · ' + esc(filterBits.join(' · ')) + '</p>' : '';
+
+  const rows = agents.map(function (item) {
+    return '<tr><td><span class="cell-main mono">' + esc(item.agent_key) + '</span></td>' +
+      '<td class="num">' + num(item.events) + '</td>' +
+      '<td class="num text-accent">' + num(item.new_events) + '</td>' +
+      '<td class="num dim">' + num(item.duplicate_events) + '</td>' +
+      '<td class="num">' + num(item.sessions) + '</td></tr>';
+  }).join('');
+
+  const warnings = (data.warnings || []).length
+    ? '<p class="intake-note">' + data.warnings.map(function (item) { return esc(item); }).join('<br>') + '</p>'
+    : '';
+  const range = data.first_at && data.last_at
+    ? '<p class="field-help">事件时间范围：' + fmtDate(data.first_at) + ' — ' + fmtDate(data.last_at) + '</p>'
+    : '';
+
+  return '<div class="panel-head"><div><h2 class="panel-title">来源预览 · ' + esc(data.name) + '</h2>' +
+    '<p class="panel-sub mono">' + esc(data.path) + '</p></div><span class="tag">' + esc(meta.join(' · ')) + '</span></div>' +
+    '<div class="panel-body"><div class="task-summary">' +
+    '<div class="task-stat"><span>事件总数</span><b>' + num(totals.events) + '</b><small class="dim">EVENTS</small></div>' +
+    '<div class="task-stat"><span>将新增</span><b class="text-accent">' + num(totals.new_events) + '</b><small class="dim">NEW</small></div>' +
+    '<div class="task-stat"><span>已存在</span><b>' + num(totals.duplicate_events) + '</b><small class="dim">DUPLICATE</small></div>' +
+    '<div class="task-stat"><span>会话</span><b>' + num(totals.sessions) + '</b><small class="dim">' + num(totals.new_sessions) + ' 新增 / ' + num(totals.merged_sessions) + ' 合并</small></div></div>' +
+    filterLine + warnings + range +
+    '<div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr><th>Agent</th><th class="num">事件</th><th class="num">新增</th><th class="num">重复</th><th class="num">会话</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    (agents.length ? '' : emptyState('档案包里没有可导入的事件', '确认导出时选择的 Agent 与时间范围，以及本机是否已接入相同 Agent。', 'archive')) + '</div>';
+}
+
 function previewHtml(data) {
+  if (data.kind === 'archive') return archivePreviewHtml(data);
   const totals = data.totals || {};
   const sources = data.sources || [];
   const sizeLine = bytes(data.size_bytes) + (data.exported_at ? ' · 导出于 ' + relTime(data.exported_at) : '') + (data.tool_version ? ' · v' + esc(data.tool_version) : '');
@@ -240,15 +299,16 @@ function previewHtml(data) {
 
 function progressHtml(run) {
   const status = runMeta(run.status);
+  const archive = run.kind === 'archive';
   const percent = Number(run.progress || 0);
   const notes = (run.errors || []).concat(run.warnings || []).slice(0, 3);
   return '<div class="intake-progress"><div class="intake-progress-head"><span>任务 #' + run.id + ' · ' + esc(status.label) + '</span><b>' + percent + '%</b></div>' +
     '<div class="progress-line"><i style="width:' + percent + '%"></i></div>' +
     '<div class="intake-stats">' +
-    '<div class="intake-stat"><span>已处理会话</span><b>' + num(run.processed_sessions) + ' / ' + num(run.total_sessions) + '</b></div>' +
-    '<div class="intake-stat"><span>写入事件</span><b>' + num(run.imported_events) + '</b></div>' +
+    '<div class="intake-stat"><span>' + (archive ? '已处理事件' : '已处理会话') + '</span><b>' + num(run.processed_sessions) + ' / ' + num(run.total_sessions) + '</b></div>' +
+    '<div class="intake-stat"><span>' + (archive ? '新增事件' : '写入事件') + '</span><b>' + num(run.imported_events) + '</b></div>' +
     '<div class="intake-stat"><span>去重跳过</span><b>' + num(run.duplicate_events) + '</b></div>' +
-    '<div class="intake-stat"><span>跳过消息</span><b>' + num(run.skipped_messages) + '</b></div></div>' +
+    '<div class="intake-stat"><span>' + (archive ? '合并会话' : '跳过消息') + '</span><b>' + num(archive ? run.imported_sessions : run.skipped_messages) + '</b></div></div>' +
     (notes.length ? '<p class="intake-note">' + notes.map(function (item) { return esc(item); }).join('<br>') + '</p>' : '') + '</div>';
 }
 
@@ -294,7 +354,11 @@ function pollRun(root, token, runId) {
         clearInterval(state.importTimer);
         state.importTimer = null;
         const ok = run.status === 'success' || run.status === 'partial';
-        showToast(ok ? '导入完成：' + num(run.imported_events) + ' 条事件' : '导入结束：' + runMeta(run.status).label, ok ? 'success' : 'error');
+        showToast(ok
+          ? (run.kind === 'archive'
+            ? '合并完成：新增 ' + num(run.imported_events) + ' 条，去重 ' + num(run.duplicate_events) + ' 条'
+            : '导入完成：' + num(run.imported_events) + ' 条事件')
+          : '导入结束：' + runMeta(run.status).label, ok ? 'success' : 'error');
         setTimeout(function () { if (isCurrent(token)) navigate('import', {}, true); }, 800);
       }
     } catch (error) {

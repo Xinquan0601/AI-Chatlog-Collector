@@ -92,7 +92,8 @@ flowchart TB
 | 调度层 | `jobs.py` | 任务队列、工作线程、自动重试、定时调度、自动备份 |
 | 查询层 | `analytics.py` | 总览、统计、会话/事件查询、任务/日志、全局搜索 |
 | 导出层 | `exporting.py` | CSV / JSONL / JSON / ZIP、数据字典、manifest |
-| 迁移层 | `importing.py` | 旧 chatlog 导出库预览、按会话转换、后台导入运行与断点 |
+| 迁移层 | `importing.py` | 旧 chatlog 导出库与档案包的预览、转换、后台导入运行与断点 |
+| 档案层 | `archive.py` | 识别并流式读取 ZIP / CSV / JSONL / JSON 档案包，按 fingerprint 做新增 / 重复统计 |
 | 运维层 | `backup.py` / `db.py` | 在线备份、日志、配置、审计、表计数 |
 | 展示层 | `web/` | 登录、总览、会话、详情、统计、任务、备份、日志、设置、文档 |
 
@@ -138,8 +139,8 @@ flowchart TB
 
 「数据导出」页（`web/assets/pages/export.js`，路由 `#/export`）与旧导出对话框共用同一套接口，但提供跨会话的批量筛选：AGENTS 多选、事件类型多选、闭区间日期与快捷范围。多选组内为 OR、组间为 AND；日期在前端按本地自然日转换为 UTC 毫秒边界（`00:00:00.000` ~ `23:59:59.999`），服务端统一用 `>=` / `<=` 比较 `events.timestamp`。
 
-1. UI 先调 `GET /api/export/estimate`，用与导出完全相同的筛选参数试算条数、会话数与体积，超限直接禁用按钮；响应额外带 `by_agent`（只应用除 Agent 外的条件），让每张 Agent 卡片显示自己的命中数。
-2. 服务端按筛选条件 count；超过 `export_max_rows` 返回 413。
+1. UI 先调 `GET /api/export/estimate`，用与导出完全相同的筛选参数试算条数、会话数与体积；`limit=0` 时不设上限（`unlimited=true`），只有手动设置上限且超限才禁用按钮。响应额外带 `by_agent`（只应用除 Agent 外的条件），让每张 Agent 卡片显示自己的命中数。
+2. 服务端按筛选条件 count；`export_max_rows > 0` 且命中超过该值时才返回 413，默认导出全部命中记录。
 3. 生成临时文件：
    - CSV：UTF-8 BOM、公式注入防护；
    - JSONL：逐行写出；
@@ -155,14 +156,15 @@ flowchart TB
 4. 写入 `backups`，按保留策略删除旧备份。
 5. 记录系统日志与审计；下载通过受保护的 GET 接口完成。
 
-### 3.6 旧数据导入
+### 3.6 数据导入（旧库与档案包）
 
-1. GET /api/import/candidates 扫描库所在目录，用 export_meta 识别旧 chatlog 导出库。
-2. GET /api/import/preview?path= 以 mode=ro&immutable=1 只读打开源库，按旧 source 统计会话 / 消息 / 推理 / 工具与时间范围，并给出映射结果。
-3. POST /api/import/runs 校验文件后写入一条 queued 运行记录，交给单后台线程执行；已有任务时返回 409。
-4. 工作线程按 session_pk 分块读取：每个会话把旧 messages 行转换成四类事件（工具结果按 FIFO 配对最近一次工具调用），再调用 ingestion.import_batch 写入，指纹固定为旧 row_id。
-5. 每完成一个会话推进 cursor_session_pk；轮询 GET /api/import/runs/{id} 读取进度，POST .../cancel 设置取消标记。
-6. 结束后写 success / partial / failed / canceled 与统计；服务启动时把遗留的 queued / running 标记为 interrupted，重新导入即可续传已写入部分。
+1. GET /api/import/candidates 扫描库所在目录：用 export_meta 识别旧 chatlog 导出库，同时列出带 events.csv 的 .zip 档案包。
+2. GET /api/import/preview?path= 先由 `is_archive_file` 判断来源类型。旧库以 mode=ro&immutable=1 只读打开，按旧 source 统计规模并给出映射；档案包走 `archive.preview`，流式读取事件、按 fingerprint 与本地比对，返回新增 / 重复 / 会话合并统计。
+3. POST /api/import/runs 校验文件后写入一条 queued 运行记录（options 里记录 kind），交给单后台线程执行；已有任务时返回 409。
+4. 旧库路径：工作线程按 session_pk 分块读取，每个会话把旧 messages 行转换成四类事件（工具结果按 FIFO 配对最近一次工具调用），再调用 ingestion.import_batch 写入，指纹固定为 row:<row_id>。
+5. 档案包路径：`run_archive_import` 按 1500 条事件分批，逐条 `normalize_event` → 丢弃本机未接入的 Agent → 预查会话是否存在 → 组装 batch 调 `import_batch`。事件保留源机器的 fingerprint，因此同一记录不会重复写入；本机缺失的会话会被创建并重算聚合。CSV 读取时会去掉导出侧为防表格公式而加的 `'` 前缀，正文与源端一致。
+6. 进度：旧库推进 cursor_session_pk，档案包以事件数为单位；轮询 GET /api/import/runs/{id} 读取进度，POST .../cancel 设置取消标记，已写入部分保留。
+7. 结束后写 success / partial / failed / canceled 与统计；服务启动时把遗留的 queued / running 标记为 interrupted，重新导入即可按指纹续传。
 
 ---
 
@@ -250,7 +252,9 @@ failed / partial / success ──> 手动重试（创建新任务）
 
 ### 4.7 import_runs
 
-字段：源文件路径 / 名称、status、options_json、total / processed / imported / skipped 会话数、imported / duplicate 事件数、skipped 消息数、cursor_session_pk、errors / warnings / summary、创建者与起止时间。
+字段：源文件路径 / 名称、kind（legacy / archive）、status、options_json、total / processed / imported / skipped 会话数、imported / duplicate 事件数、skipped 消息数、cursor_session_pk、errors / warnings / summary、创建者与起止时间。
+
+档案包运行时 `total_sessions` / `processed_sessions` 复用为事件计数单位，`imported_sessions` 记录新建或合并的会话数，UI 据此切换文案。
 
 状态机：
 
@@ -559,7 +563,7 @@ Agent 卡片 → 配置 → 编辑 roots / patterns / 调度 / 重试
   拖进内存；12 万事件档案上单批 2,000 条新增约 60 ms，重复同步约 20 ms。
 - 连接：WAL 只在建库时设置，其余为 `synchronous=NORMAL`、32 MB cache、`temp_store=MEMORY`、256 MB mmap，
   单次连接开销约 1 ms。
-- 导出：临时文件流式发送；限制 200,000 行，防止内存爆炸。
+- 导出：临时文件流式发送，默认不限制行数；如需保护可在设置页配置上限（0 = 不限制，最大 1,000,000）。
 - SQLite WAL 支持读写并发；长任务使用短事务分批提交。
 - 大量源文件单次发现上限 5,000；单个文件上限 1,024MB（可配置）。
 
@@ -615,4 +619,4 @@ Agent 卡片 → 配置 → 编辑 roots / patterns / 调度 / 重试
 5. 可选的定时清理 / 数据保留策略。
 6. 审计日志导出与告警 Webhook。
 7. 对象存储备份与加密备份。
-8. 拆分采集 worker，支持多机采集。
+8. 多机实时同步（当前用档案包合并做离线汇总，见 3.6）。

@@ -187,7 +187,7 @@ Query：
 | q | 关键词，匹配 `content` 或 `tool_name`（不区分大小写） |
 | project / session_id | 项目 / 会话过滤 |
 
-未提供的条件不加限制；不同条件之间为「且」。成功返回附件；超出行数上限返回 413 `export_too_large`。
+未提供的条件不加限制；不同条件之间为「且」。成功返回附件。默认不设行数上限（`export_max_rows=0`）；只有手动设置上限且命中超过时返回 413 `export_too_large`。
 
 ```bash
 curl -b cookies.txt -OJ \
@@ -214,7 +214,8 @@ curl -b cookies.txt -OJ \
       {"agent_key": "opencode", "events": 625, "sessions": 29},
       {"agent_key": "deepseekharness", "events": 100, "sessions": 6}
     ],
-    "limit": 200000,
+    "limit": 0,
+    "unlimited": true,
     "exceeded": false,
     "filters": {
       "agents": ["codex", "zcode"],
@@ -237,7 +238,8 @@ curl -b cookies.txt -OJ \
 | agents | 规范化后的 Agent 过滤列表；空数组表示不限 |
 | by_agent | 每个 Agent 在「其余条件不变」时的命中事件数与会话数，按事件数降序 |
 | filters | 服务端实际生效的筛选条件（日期已归一化为 UTC 毫秒） |
-| limit | 当前 `export_max_rows` 设置 |
+| limit | 当前 `export_max_rows` 设置，`0` 表示不限制 |
+| unlimited | 是否不限制行数（`limit <= 0`） |
 | exceeded | 是否超过单次导出上限（为 true 时 `/api/export` 返回 413） |
 
 ---
@@ -278,29 +280,49 @@ Body：`{"note":"升级前快照"}`。返回新备份记录。
 
 ---
 
-## 旧数据导入  （管理员）
+## 数据导入  （管理员）
 
-把旧版 chatlog 导出库（sessions + messages + export_meta）迁入当前档案库。源文件以 mode=ro&immutable=1 只读打开，事件指纹使用旧库 row_id，重复导入自动去重。
+两种来源共用同一套运行记录与接口，服务端按文件自动识别，运行记录里的 `kind` 为 `legacy` 或 `archive`：
+
+- **旧库迁移**：旧版 chatlog 导出库（`sessions` + `messages` + `export_meta`），以 `mode=ro&immutable=1` 只读打开，事件指纹为 `row:<row_id>`。
+- **档案包合并**：本工具导出的 ZIP / CSV / JSONL / JSON，按包内 `fingerprint` 与本地事件比对，只写入缺失记录；用于把另一台机器采集的内容并入本机，重复执行保持幂等。只有 ZIP 带 `sessions.csv`（会话摘要），单文件 CSV / JSONL / JSON 仅含事件；导出时加在 `= + - @` 开头文本前的 `'` 保护前缀会在导入时还原。
 
 ### GET /api/import/candidates
 
-返回档案库同目录下发现的导出库：items[]（path / name / size_bytes / sessions / messages / modified_at）。
+返回档案库同目录下发现的来源：items[]（path / name / size_bytes / sessions / messages / modified_at / kind）。`.zip` 档案包额外给出 `events` 与 `sessions`。
 
 ### GET /api/import/preview?path=...
 
-返回映射与规模：totals（sessions / messages / reasoning / tool_calls / tool_results / tokens）、sources[]（source、agent_key、supported、计数、时间范围）、warnings。路径无效返回 400 bad_source。
+自动识别来源并返回预览。路径无效或不是可识别的导出文件时返回 400 `bad_source`。
+
+旧库（`kind="legacy"`）：totals（sessions / messages / reasoning / tool_calls / tool_results / tokens）、sources[]（source、agent_key、supported、计数、时间范围）、warnings。
+
+档案包（`kind="archive"`）：
+
+| 字段 | 说明 |
+|---|---|
+| format | `bundle` / `csv` / `jsonl` / `json` |
+| exported_at | 导出时间（来自 manifest，可能为空） |
+| filters | manifest 里记录的导出筛选条件 |
+| totals | `events、sessions、new_events、duplicate_events、new_sessions、merged_sessions、skipped、unknown_agents` |
+| by_agent | 每个 Agent 的 events / sessions / new_events / duplicate_events |
+| by_type | 四类事件的分布 |
+| first_at / last_at | 事件时间范围（UTC ISO-8601） |
+| warnings | 跳过原因、本机未接入的 Agent 等 |
 
 ### GET /api/import/runs?limit=20
 
-返回导入记录 items[] 与当前运行中的 active_run_id。每条含 status、progress、会话 / 事件统计、errors、warnings。
+返回导入记录 items[] 与当前运行中的 active_run_id。每条含 kind、status、progress、会话 / 事件统计、errors、warnings。
 
 ### POST /api/import/runs
 
-Body：{"path":"D:/.../chatlog-export.db","include_reasoning":false,"dry_run":false}。返回 202 与 run_id；已有导入运行时返回 409 conflict。
+Body：{"path":"D:/.../chatlog-export.db","include_reasoning":false,"dry_run":false}，档案包路径同样适用；`include_reasoning` 只对旧库生效。返回 202 与 run_id；已有导入运行时返回 409 `conflict`。
 
 ### GET /api/import/runs/{id}
 
 单次导入的进度与统计：processed_sessions / total_sessions、imported_sessions、imported_events、duplicate_events、skipped_messages、errors、warnings、progress。
+
+档案包运行时 `total_sessions` / `processed_sessions` 以事件为单位计数，`imported_sessions` 表示新建或合并的会话数，`imported_events` 为实际写入的事件数。
 
 ### POST /api/import/runs/{id}/cancel
 
@@ -318,7 +340,7 @@ Body：{"path":"D:/.../chatlog-export.db","include_reasoning":false,"dry_run":fa
 
 ### PATCH /api/settings
 
-可更新：`site_name、auto_sync_enabled、sync_interval_minutes、auto_retry_attempts、auto_backup_enabled、backup_interval_hours、backup_retention、default_page_size、timezone、keep_forever、export_max_rows`。
+可更新：`site_name、auto_sync_enabled、sync_interval_minutes、auto_retry_attempts、auto_backup_enabled、backup_interval_hours、backup_retention、default_page_size、timezone、keep_forever、export_max_rows`。`export_max_rows` 取 0 表示不限制，正数上限为 1,000,000。
 
 ### GET /api/users
 

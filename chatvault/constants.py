@@ -159,7 +159,9 @@ DEFAULT_SETTINGS = {
     "default_page_size": 20,
     "timezone": "Asia/Shanghai",
     "keep_forever": True,
-    "export_max_rows": 200000,
+    # 0 = unlimited: an export is the analysis machine's merge source, so it
+    # must be able to carry the complete archive.
+    "export_max_rows": 0,
     "demo_seeded": False,
 }
 

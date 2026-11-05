@@ -390,6 +390,12 @@ def init_db(db_path: str | Path | None = None) -> None:
                 "INSERT OR IGNORE INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)",
                 (key, json_dumps(value), now),
             )
+        # Existing archives still hold the old 200000 row cap.  Exports are now
+        # unlimited by default, so rewrite only the untouched old default once.
+        if get_setting(conn, "export_limit_unlimited_v1") is not True:
+            if get_setting(conn, "export_max_rows") == 200000:
+                set_setting(conn, "export_max_rows", 0)
+            set_setting(conn, "export_limit_unlimited_v1", True)
         normalized = normalize_event_timestamps(conn)
         if normalized:
             log_system(conn, "info", "storage", f"已统一 {normalized} 条事件的时间精度", {"rows": normalized})

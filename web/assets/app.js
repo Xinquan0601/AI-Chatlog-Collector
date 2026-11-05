@@ -28,7 +28,7 @@ const PAGES = {
   export: { title: '数据导出', nav: 'export', admin: false, render: renderExport },
   tasks: { title: '采集任务', nav: 'tasks', admin: false, render: renderTasks },
   backups: { title: '数据备份', nav: 'backups', admin: true, render: renderBackups },
-  import: { title: '旧数据导入', nav: 'import', admin: true, render: renderImport },
+  import: { title: '数据导入', nav: 'import', admin: true, render: renderImport },
   logs: { title: '日志与审计', nav: 'logs', admin: true, render: renderLogs },
   settings: { title: '系统设置', nav: 'settings', admin: true, render: renderSettings },
   about: { title: '架构与文档', nav: 'about', admin: false, render: renderAbout }

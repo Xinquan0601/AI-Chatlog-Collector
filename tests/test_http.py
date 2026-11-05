@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import sqlite3
@@ -10,7 +12,9 @@ import unittest
 import urllib.error
 import urllib.request
 import http.cookiejar
+import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from chatvault.constants import AGENT_DEFINITIONS, API_REVISION
 from chatvault.db import connection, init_db
@@ -174,7 +178,8 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(data["by_type"]["assistant_message"], 1)
         self.assertEqual(data["by_type"]["tool_call"], 0)
         self.assertFalse(data["exceeded"])
-        self.assertGreater(data["limit"], 0)
+        self.assertEqual(data["limit"], 0)
+        self.assertTrue(data["unlimited"])
         self.assertGreater(data["bytes"], 0)
 
         status, payload = self.call(admin, "/api/export/estimate?types=assistant_message")
@@ -270,6 +275,91 @@ class HTTPTests(unittest.TestCase):
 
         status, payload = self.call(admin, "/api/import/runs/999999/cancel", "POST", {})
         self.assertEqual(status, 409)
+
+
+    def test_05_archive_import_api(self):
+        admin = self.opener()
+        status, _ = self.login(admin, "admin", "test-admin-123")
+        self.assertEqual(status, 200)
+        with connection(self.db_path) as conn:
+            before_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            shared = conn.execute(
+                "SELECT fingerprint FROM events WHERE source_event_id = 'u1'"
+            ).fetchone()
+        self.assertIsNotNone(shared)
+
+        bundle_path = Path(self.temp.name) / "machine-a.zip"
+        columns = ["agent", "session_id", "event_type", "timestamp", "content", "fingerprint"]
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=columns)
+        writer.writeheader()
+        writer.writerow({
+            "agent": "codex", "session_id": "http-session", "event_type": "user_message",
+            "timestamp": "2026-11-03T01:00:00.000Z", "content": "hello",
+            "fingerprint": shared["fingerprint"],
+        })
+        writer.writerow({
+            "agent": "codex", "session_id": "remote-session", "event_type": "user_message",
+            "timestamp": "2026-11-03T04:00:00.000Z", "content": "来自 A 的新记录",
+            "fingerprint": "remote-fp-1",
+        })
+        with zipfile.ZipFile(bundle_path, "w") as archive:
+            archive.writestr("events.csv", buffer.getvalue())
+            archive.writestr(
+                "sessions.csv",
+                "agent_key,external_id,title,project,started_at\n"
+                "codex,http-session,HTTP 测试会话,tests,2026-11-03T01:00:00.000Z\n"
+                "codex,remote-session,远端会话,remote,2026-11-03T04:00:00.000Z\n",
+            )
+            archive.writestr(
+                "manifest.json",
+                json.dumps({
+                    "export_version": "1.0",
+                    "generated_at": "2026-11-03T05:00:00Z",
+                    "counts": {"events": 2, "sessions": 2},
+                }, ensure_ascii=False),
+            )
+
+        status, payload = self.call(admin, "/api/import/candidates")
+        self.assertEqual(status, 200)
+        self.assertTrue(any(item.get("kind") == "archive" for item in payload["data"]["items"]))
+
+        status, payload = self.call(admin, "/api/import/preview?path=" + quote(str(bundle_path)))
+        self.assertEqual(status, 200)
+        data = payload["data"]
+        self.assertEqual(data["kind"], "archive")
+        self.assertEqual(data["format"], "bundle")
+        self.assertEqual(data["totals"]["events"], 2)
+        self.assertEqual(data["totals"]["new_events"], 1)
+        self.assertEqual(data["totals"]["duplicate_events"], 1)
+        self.assertEqual(data["totals"]["merged_sessions"], 1)
+
+        status, payload = self.call(admin, "/api/import/runs", "POST", {"path": str(bundle_path)})
+        self.assertEqual(status, 202)
+        run_id = payload["data"]["run_id"]
+        deadline = time.time() + 15
+        detail = None
+        while time.time() < deadline:
+            status, payload = self.call(admin, "/api/import/runs/" + str(run_id))
+            self.assertEqual(status, 200)
+            detail = payload["data"]["item"]
+            if detail["status"] not in ("queued", "running"):
+                break
+            time.sleep(0.2)
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["status"], "success")
+        self.assertEqual(detail["kind"], "archive")
+        self.assertEqual(detail["imported_events"], 1)
+        self.assertEqual(detail["duplicate_events"], 1)
+        self.assertEqual(detail["imported_sessions"], 1)
+        with connection(self.db_path) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], before_events + 1)
+            session = conn.execute(
+                "SELECT title, project FROM sessions WHERE external_id = 'remote-session'"
+            ).fetchone()
+            self.assertIsNotNone(session)
+            self.assertEqual(session["title"], "远端会话")
+            self.assertEqual(session["project"], "remote")
 
 
 if __name__ == "__main__":

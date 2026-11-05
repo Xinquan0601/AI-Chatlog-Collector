@@ -24,8 +24,8 @@ from chatvault.db import (
     migrate_agent_roots,
 )
 from chatvault.collectors import Source, collect_source, discover_sources
-from chatvault.exporting import create_export, estimate_export
-from chatvault.importing import preview, run_import
+from chatvault.exporting import ExportTooLarge, create_export, estimate_export
+from chatvault.importing import detect_import_kind, preview, run_archive_import, run_import
 from chatvault.ingestion import import_batch, refresh_session_aggregates
 from chatvault.parsers import (
     parse_claude_jsonl,
@@ -390,6 +390,39 @@ class StorageTests(unittest.TestCase):
             finally:
                 Path(exported["path"]).unlink(missing_ok=True)
 
+    def test_export_limit_defaults_to_unlimited(self):
+        with connection(self.db_path) as conn:
+            self.assertEqual(get_settings(conn)["export_max_rows"], 0)
+            import_batch(conn, "codex", {
+                "source_path": "demo/limit.jsonl",
+                "sessions": [{"external_id": "s-limit", "title": "不限量导出"}],
+                "events": [
+                    {"session_external_id": "s-limit", "type": "user_message", "source_event_id": "u1", "sequence": 1, "timestamp": "2026-11-06T01:00:00Z", "content": "一"},
+                    {"session_external_id": "s-limit", "type": "assistant_message", "source_event_id": "a1", "sequence": 2, "timestamp": "2026-11-06T01:00:01Z", "content": "二"},
+                    {"session_external_id": "s-limit", "type": "user_message", "source_event_id": "u2", "sequence": 3, "timestamp": "2026-11-06T01:00:02Z", "content": "三"},
+                ],
+                "errors": [],
+            })
+            conn.commit()
+            exported = create_export(conn, format="jsonl", agent="codex")
+            try:
+                self.assertEqual(exported["counts"]["events"], 3)
+                lines = Path(exported["path"]).read_text(encoding="utf-8").strip().splitlines()
+                self.assertEqual(len(lines), 3)
+            finally:
+                Path(exported["path"]).unlink(missing_ok=True)
+            with self.assertRaises(ExportTooLarge):
+                create_export(conn, format="csv", agent="codex", max_rows=2)
+
+    def test_old_export_cap_is_migrated(self):
+        with connection(self.db_path) as conn:
+            conn.execute("UPDATE settings SET value_json = '200000' WHERE key = 'export_max_rows'")
+            conn.execute("DELETE FROM settings WHERE key = 'export_limit_unlimited_v1'")
+            conn.commit()
+        init_db(self.db_path)
+        with connection(self.db_path) as conn:
+            self.assertEqual(get_settings(conn)["export_max_rows"], 0)
+
     def test_session_events_type_filter(self):
         now = "2026-11-03T02:00:00.000Z"
         batch = {
@@ -530,6 +563,237 @@ class StorageTests(unittest.TestCase):
                 self.assertEqual(exported["manifest"]["filters"]["agents"], ["codex", "zcode"])
             finally:
                 Path(exported["path"]).unlink(missing_ok=True)
+
+
+class ArchiveMergeTests(unittest.TestCase):
+    """Merging an export written on another machine into the local archive."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.source_db = Path(self.temp.name) / "machine-a.db"
+        self.target_db = Path(self.temp.name) / "machine-b.db"
+        init_db(self.source_db)
+        init_db(self.target_db)
+        with connection(self.source_db) as conn:
+            import_batch(conn, "codex", {
+                "source_path": "A/session-1.jsonl",
+                "sessions": [{
+                    "external_id": "s-1", "title": "机器 A 会话", "project": "proj-a",
+                    "model": "gpt-5", "started_at": "2026-11-03T01:00:00Z",
+                    "ended_at": "2026-11-03T01:05:00Z", "tokens_input": 30, "tokens_output": 12,
+                    "source_path": "A/session-1.jsonl",
+                }],
+                "events": [
+                    {"session_external_id": "s-1", "type": "user_message", "source_event_id": "u1", "sequence": 1, "timestamp": "2026-11-03T01:00:00Z", "content": "A 的问题"},
+                    {"session_external_id": "s-1", "type": "assistant_message", "source_event_id": "a1", "sequence": 2, "timestamp": "2026-11-03T01:00:01Z", "content": "A 的回答"},
+                    {"session_external_id": "s-1", "type": "tool_call", "source_event_id": "c1", "sequence": 3, "timestamp": "2026-11-03T01:00:02Z", "content": "", "tool_name": "exec_command", "tool_call_id": "call-a", "tool_status": "completed", "tool_input_json": json_dumps({"cmd": "ls"})},
+                ],
+                "errors": [],
+            })
+            import_batch(conn, "codex", {
+                "source_path": "B/shared.jsonl",
+                "sessions": [{"external_id": "s-2", "title": "两台机器都有的会话", "project": "proj-b"}],
+                "events": [
+                    {"session_external_id": "s-2", "type": "user_message", "source_event_id": "u2", "sequence": 1, "timestamp": "2026-11-03T02:00:00Z", "content": "两台机器都有这条"},
+                ],
+                "errors": [],
+            })
+            conn.commit()
+            exported = create_export(conn, format="bundle", agent="codex")
+        self.bundle_path = Path(exported["path"])
+
+        # Machine B already collected the shared event plus one of its own.
+        with connection(self.target_db) as conn:
+            import_batch(conn, "codex", {
+                "source_path": "B/shared.jsonl",
+                "sessions": [{"external_id": "s-2", "title": "两台机器都有的会话", "project": "proj-b"}],
+                "events": [
+                    {"session_external_id": "s-2", "type": "user_message", "source_event_id": "u2", "sequence": 1, "timestamp": "2026-11-03T02:00:00Z", "content": "两台机器都有这条"},
+                ],
+                "errors": [],
+            })
+            import_batch(conn, "codex", {
+                "source_path": "B/only-b.jsonl",
+                "sessions": [{"external_id": "s-3", "title": "机器 B 独有", "project": "proj-c"}],
+                "events": [
+                    {"session_external_id": "s-3", "type": "user_message", "source_event_id": "u3", "sequence": 1, "timestamp": "2026-11-03T03:00:00Z", "content": "只在 B 上"},
+                ],
+                "errors": [],
+            })
+            conn.commit()
+
+    def tearDown(self):
+        self.bundle_path.unlink(missing_ok=True)
+        self.temp.cleanup()
+
+    def test_detect_and_preview_overlap(self):
+        self.assertEqual(detect_import_kind(self.bundle_path), "archive")
+        self.assertEqual(detect_import_kind(self.source_db), "legacy")
+        info = preview(self.bundle_path, db_path=self.target_db)
+        self.assertEqual(info["kind"], "archive")
+        self.assertEqual(info["format"], "bundle")
+        self.assertEqual(info["totals"]["events"], 4)
+        self.assertEqual(info["totals"]["new_events"], 3)
+        self.assertEqual(info["totals"]["duplicate_events"], 1)
+        self.assertEqual(info["totals"]["sessions"], 2)
+        self.assertEqual(info["totals"]["merged_sessions"], 1)
+        self.assertEqual(info["totals"]["new_sessions"], 1)
+        self.assertEqual(info["by_agent"][0]["agent_key"], "codex")
+        self.assertEqual(info["by_agent"][0]["events"], 4)
+        self.assertEqual(info["by_type"]["user_message"], 2)
+        self.assertEqual(info["first_at"], "2026-11-03T01:00:00.000Z")
+        self.assertEqual(info["last_at"], "2026-11-03T02:00:00.000Z")
+
+    def test_merge_is_idempotent(self):
+        result = run_archive_import(self.bundle_path, db_path=self.target_db)
+        self.assertEqual(result["events_seen"], 4)
+        self.assertEqual(result["events_inserted"], 3)
+        self.assertEqual(result["duplicates"], 1)
+        self.assertEqual(result["sessions_seen"], 2)
+        self.assertEqual(result["sessions_merged"], 1)
+        self.assertFalse(result["errors"])
+
+        with connection(self.target_db) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 5)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 3)
+            titles = {row["external_id"]: row["title"] for row in conn.execute("SELECT external_id, title FROM sessions")}
+            self.assertEqual(titles["s-1"], "机器 A 会话")
+            self.assertEqual(titles["s-2"], "两台机器都有的会话")
+            self.assertEqual(titles["s-3"], "机器 B 独有")
+            session = conn.execute("SELECT * FROM sessions WHERE external_id = 's-1'").fetchone()
+            self.assertEqual(session["project"], "proj-a")
+            self.assertEqual(session["model"], "gpt-5")
+            self.assertEqual(session["event_count"], 3)
+            self.assertEqual(session["tool_call_count"], 1)
+            tool = conn.execute("SELECT tool_call_id, tool_name FROM events WHERE agent_key='codex' AND type='tool_call'").fetchone()
+            self.assertEqual(tool["tool_call_id"], "call-a")
+            self.assertEqual(tool["tool_name"], "exec_command")
+
+        again = run_archive_import(self.bundle_path, db_path=self.target_db)
+        self.assertEqual(again["events_inserted"], 0)
+        self.assertEqual(again["duplicates"], 4)
+        with connection(self.target_db) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 5)
+
+    def test_csv_merge_preserves_formula_guarded_content(self):
+        source = Path(self.temp.name) / "formula-source.db"
+        init_db(source)
+        with connection(source) as conn:
+            import_batch(conn, "codex", {
+                "source_path": "formula.jsonl",
+                "sessions": [{"external_id": "f-1", "title": "- 减号开头的标题"}],
+                "events": [
+                    {"session_external_id": "f-1", "type": "user_message", "source_event_id": "fu1", "sequence": 1, "timestamp": "2026-11-04T01:00:00Z", "content": "- 列表项开头"},
+                    {"session_external_id": "f-1", "type": "assistant_message", "source_event_id": "fa1", "sequence": 2, "timestamp": "2026-11-04T01:00:01Z", "content": "=SUM(A1:A2)"},
+                    {"session_external_id": "f-1", "type": "tool_result", "source_event_id": "ft1", "sequence": 3, "timestamp": "2026-11-04T01:00:02Z", "content": "@skill:demo 的说明"},
+                ],
+                "errors": [],
+            })
+            conn.commit()
+            export = create_export(conn, format="bundle", agent="codex")
+        path = Path(export["path"])
+        try:
+            target = Path(self.temp.name) / "formula-target.db"
+            init_db(target)
+            result = run_archive_import(path, db_path=target)
+            self.assertEqual(result["format"], "bundle")
+            self.assertEqual(result["events_inserted"], 3)
+            with connection(target) as conn:
+                contents = [
+                    row["content"] for row in conn.execute(
+                        "SELECT content FROM events ORDER BY timestamp"
+                    )
+                ]
+                title = conn.execute("SELECT title FROM sessions").fetchone()["title"]
+            self.assertEqual(contents, ["- 列表项开头", "=SUM(A1:A2)", "@skill:demo 的说明"])
+            self.assertEqual(title, "- 减号开头的标题")
+
+            again = run_archive_import(path, db_path=target)
+            self.assertEqual(again["events_inserted"], 0)
+            self.assertEqual(again["events_updated"], 0)
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_dry_run_counts_without_writing(self):
+        result = run_archive_import(self.bundle_path, db_path=self.target_db, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["events_inserted"], 3)
+        self.assertEqual(result["duplicates"], 1)
+        with connection(self.target_db) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 2)
+
+    def test_flat_formats_round_trip(self):
+        with connection(self.source_db) as conn:
+            exports = {
+                "csv": Path(create_export(conn, format="csv", agent="codex")["path"]),
+                "jsonl": Path(create_export(conn, format="jsonl", agent="codex")["path"]),
+                "json": Path(create_export(conn, format="json", agent="codex")["path"]),
+            }
+        try:
+            for label, path in exports.items():
+                with self.subTest(format=label):
+                    target = Path(self.temp.name) / f"target-{label}.db"
+                    target.unlink(missing_ok=True)
+                    init_db(target)
+                    self.assertEqual(detect_import_kind(path), "archive")
+                    result = run_archive_import(path, db_path=target)
+                    self.assertEqual(result["format"], label)
+                    self.assertEqual(result["events_inserted"], 4, result)
+                    self.assertEqual(result["duplicates"], 0)
+                    with connection(target) as conn:
+                        self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 4)
+            parsed = json.loads(exports["json"].read_text(encoding="utf-8"))
+            self.assertEqual(len(parsed["events"]), 4)
+            self.assertEqual(parsed["manifest"]["counts"]["events"], 4)
+        finally:
+            for path in exports.values():
+                path.unlink(missing_ok=True)
+
+    def test_json_stream_handles_large_files(self):
+        rows = [
+            {
+                "agent": "codex", "session_id": "s-large", "event_type": "user_message",
+                "sequence": index + 1, "timestamp": "2026-11-04T00:00:00Z",
+                "content": "x" * 200, "fingerprint": f"large-fp-{index}",
+            }
+            for index in range(3000)
+        ]
+        path = Path(self.temp.name) / "large.json"
+        path.write_text(
+            json.dumps({"manifest": {"counts": {"events": 3000}}, "events": rows}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        try:
+            target = Path(self.temp.name) / "large-target.db"
+            init_db(target)
+            result = run_archive_import(path, db_path=target)
+            self.assertEqual(result["events_inserted"], 3000)
+            self.assertEqual(result["duplicates"], 0)
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_unknown_agent_is_skipped(self):
+        path = Path(self.temp.name) / "ghost.csv"
+        path.write_text(
+            "agent,session_id,event_type,fingerprint,content,timestamp\n"
+            "ghost,s-x,user_message,ghost-fp-1,hi,2026-11-05T00:00:00Z\n",
+            encoding="utf-8",
+        )
+        info = preview(path, db_path=self.target_db)
+        self.assertEqual(info["totals"]["unknown_agents"], 1)
+        result = run_archive_import(path, db_path=self.target_db)
+        self.assertEqual(result["events_inserted"], 0)
+        self.assertEqual(result["unknown_agents"], 1)
+        self.assertTrue(any("ghost" in item for item in result["warnings"]))
+        path.unlink(missing_ok=True)
+
+    def test_rejects_foreign_zip(self):
+        path = Path(self.temp.name) / "random.zip"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("readme.txt", "not an export")
+        with self.assertRaises(Exception):
+            preview(path, db_path=self.target_db)
+        path.unlink(missing_ok=True)
 
 
 LEGACY_EXPORT_SCHEMA = """
