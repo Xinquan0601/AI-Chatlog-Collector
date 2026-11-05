@@ -351,7 +351,8 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(detail["kind"], "archive")
         self.assertEqual(detail["imported_events"], 1)
         self.assertEqual(detail["duplicate_events"], 1)
-        self.assertEqual(detail["imported_sessions"], 1)
+        # 涉及两个会话：本地已有的 s-2 与被合并新建的 remote-session。
+        self.assertEqual(detail["imported_sessions"], 2)
         with connection(self.db_path) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], before_events + 1)
             session = conn.execute(

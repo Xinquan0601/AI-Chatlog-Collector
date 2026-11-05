@@ -17,6 +17,7 @@ import io
 import json
 import re
 import sqlite3
+import sys
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,6 +33,24 @@ CORE_COLUMNS = {"agent", "session_id", "event_type", "fingerprint"}
 CSV_GUARD_PREFIX = ("=", "+", "-", "@", "\t", "\r")
 ARCHIVE_SUFFIXES = {".zip", ".csv", ".jsonl", ".json"}
 FINGERPRINT_CHUNK = 400
+
+
+def _raise_csv_field_limit() -> None:
+    """Lift the stdlib 128 KiB per-field cap.
+
+    Tool results and web-search outputs routinely exceed it, and the CSV module
+    raises "field larger than field limit" instead of returning the row.
+    """
+    limit = sys.maxsize
+    while limit > 131072:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:  # pragma: no cover - 32-bit builds
+            limit //= 10
+
+
+_raise_csv_field_limit()
 
 
 class ArchiveError(RuntimeError):

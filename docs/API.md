@@ -289,7 +289,7 @@ Body：`{"note":"升级前快照"}`。返回新备份记录。
 
 ### GET /api/import/candidates
 
-返回档案库同目录下发现的来源：items[]（path / name / size_bytes / sessions / messages / modified_at / kind）。`.zip` 档案包额外给出 `events` 与 `sessions`。
+返回档案库所在目录及其子目录下发现的来源：items[]（path / name / size_bytes / sessions / messages / modified_at / kind）。`.zip` 档案包额外给出 `events` 与 `sessions`。
 
 ### GET /api/import/preview?path=...
 
@@ -322,7 +322,7 @@ Body：{"path":"D:/.../chatlog-export.db","include_reasoning":false,"dry_run":fa
 
 单次导入的进度与统计：processed_sessions / total_sessions、imported_sessions、imported_events、duplicate_events、skipped_messages、errors、warnings、progress。
 
-档案包运行时 `total_sessions` / `processed_sessions` 以事件为单位计数，`imported_sessions` 表示新建或合并的会话数，`imported_events` 为实际写入的事件数。
+档案包运行时 `total_sessions` / `processed_sessions` 以事件为单位计数，`imported_sessions` 表示本次涉及的会话总数（新建 + 已有合并），`imported_events` 为实际写入的事件数。
 
 ### POST /api/import/runs/{id}/cancel
 

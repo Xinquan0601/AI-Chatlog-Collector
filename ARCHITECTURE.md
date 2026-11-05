@@ -254,7 +254,7 @@ failed / partial / success ──> 手动重试（创建新任务）
 
 字段：源文件路径 / 名称、kind（legacy / archive）、status、options_json、total / processed / imported / skipped 会话数、imported / duplicate 事件数、skipped 消息数、cursor_session_pk、errors / warnings / summary、创建者与起止时间。
 
-档案包运行时 `total_sessions` / `processed_sessions` 复用为事件计数单位，`imported_sessions` 记录新建或合并的会话数，UI 据此切换文案。
+档案包运行时 `total_sessions` / `processed_sessions` 复用为事件计数单位，`imported_sessions` 记录涉及的会话总数（新建 + 已有合并），UI 据此切换文案。
 
 状态机：
 

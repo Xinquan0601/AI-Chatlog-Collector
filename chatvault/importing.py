@@ -272,7 +272,8 @@ def candidate_exports(db_path: str | os.PathLike[str] | None = None) -> list[dic
             if "backups" in candidate.parts:
                 continue
             legacy.append(candidate)
-        for candidate in base.glob("*.zip"):
+        # Bundles may be dropped in data/ or a subdirectory such as other_data/.
+        for candidate in base.rglob("*.zip"):
             if "backups" in candidate.parts:
                 continue
             archives.append(candidate)
@@ -985,7 +986,7 @@ class ImportManager:
                         total_sessions=int(result["events_total"] or result["events_seen"]),
                         processed_sessions=int(result["events_seen"]),
                         total_messages=int(result["sessions_seen"]),
-                        imported_sessions=int(result["sessions_merged"]),
+                        imported_sessions=int(result["sessions_seen"]),
                         imported_events=int(result["events_inserted"]),
                         duplicate_events=int(result["duplicates"]),
                         skipped_messages=int(result["skipped"]) + int(result["unknown_agents"]),

@@ -61,7 +61,7 @@ function draw(candidates, runsData, token, signal) {
       '<div class="intake-source-body"><div class="intake-source-name">' + esc(item.name) + '</div>' +
       '<div class="intake-source-meta">' + meta + ' · ' + bytes(item.size_bytes) + ' · ' + relTime(item.modified_at) + '</div></div>' +
       '<span class="tag ' + (archive ? 'accent' : 'neutral') + '">' + (archive ? '档案包' : '旧库') + '</span></label>';
-  }).join('') : '<p class="field-help">data/ 目录下没有发现可导入的文件（.db 旧库或 .zip 档案包），可以直接填写文件路径。</p>';
+  }).join('') : '<p class="field-help">data/ 目录及其子目录下没有发现可导入的文件（.db 旧库或 .zip 档案包），可以直接填写文件路径。</p>';
 
   const runRows = runs.length ? runs.map(function (run) {
     const busy = run.status === 'queued' || run.status === 'running';
@@ -74,7 +74,7 @@ function draw(candidates, runsData, token, signal) {
     const archive = run.kind === 'archive';
     const kindTag = '<span class="tag ' + (archive ? 'accent' : 'neutral') + '">' + (archive ? '档案包' : '旧库') + '</span> ';
     const counts = busy ? progress : (archive
-      ? '<span class="mono">' + num(run.imported_events) + ' 条事件</span><div class="cell-sub">' + num(run.imported_sessions) + ' 个会话合并</div>'
+      ? '<span class="mono">' + num(run.imported_events) + ' 条事件</span><div class="cell-sub">' + num(run.imported_sessions) + ' 个会话</div>'
       : '<span class="mono">' + num(run.imported_sessions) + ' 会话</span><div class="cell-sub">' + num(run.imported_events) + ' 事件</div>');
     return '<tr><td><span class="mono dim">#' + run.id + '</span></td>' +
       '<td><div class="cell-main" title="' + attr(run.source_path) + '">' + kindTag + esc(run.source_label || run.source_path) + '</div>' +
@@ -98,7 +98,7 @@ function draw(candidates, runsData, token, signal) {
     '<div class="backup-hero"><div class="backup-hero-icon">' + icon('upload') + '</div>' +
     '<div class="backup-hero-copy"><h2>入库登记台</h2><p>选择旧工具导出的 .db 旧库，或另一台机器导出的 .zip 档案包；先预览会带来多少新增、多少重复，再开始合并。任务在后台执行，可随时取消，重复执行不会产生副本。</p></div>' +
     '<div class="backup-actions"><span class="tag">' + (items.length ? items.length + ' 个候选文件' : '手动指定路径') + '</span></div></div>' +
-    '<div class="intake-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">来源文件</h2><p class="panel-sub">自动发现 data/ 下的 .db 旧库与 .zip 档案包，也可以填写绝对路径。</p></div><span class="badge neutral">SQLite / ZIP</span></div>' +
+    '<div class="intake-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">来源文件</h2><p class="panel-sub">自动发现 data/ 目录及其子目录中的 .db 旧库与 .zip 档案包，也可以填写绝对路径。</p></div><span class="badge neutral">SQLite / ZIP</span></div>' +
     '<div class="panel-body"><div class="intake-sources" id="intake-candidates">' + sourceRows + '</div>' +
     '<form class="intake-path" id="intake-path-form"><input class="input" id="intake-path" placeholder="D:/.../chatlog-export.db 或 agenttrail-20261103.zip" value="' + attr(chosenPath) + '" spellcheck="false">' +
     '<button class="btn btn-secondary btn-sm" type="submit">' + icon('search') + '<span>预览</span></button></form>' +
@@ -308,7 +308,7 @@ function progressHtml(run) {
     '<div class="intake-stat"><span>' + (archive ? '已处理事件' : '已处理会话') + '</span><b>' + num(run.processed_sessions) + ' / ' + num(run.total_sessions) + '</b></div>' +
     '<div class="intake-stat"><span>' + (archive ? '新增事件' : '写入事件') + '</span><b>' + num(run.imported_events) + '</b></div>' +
     '<div class="intake-stat"><span>去重跳过</span><b>' + num(run.duplicate_events) + '</b></div>' +
-    '<div class="intake-stat"><span>' + (archive ? '合并会话' : '跳过消息') + '</span><b>' + num(archive ? run.imported_sessions : run.skipped_messages) + '</b></div></div>' +
+    '<div class="intake-stat"><span>' + (archive ? '涉及会话' : '跳过消息') + '</span><b>' + num(archive ? run.imported_sessions : run.skipped_messages) + '</b></div></div>' +
     (notes.length ? '<p class="intake-note">' + notes.map(function (item) { return esc(item); }).join('<br>') + '</p>' : '') + '</div>';
 }
 

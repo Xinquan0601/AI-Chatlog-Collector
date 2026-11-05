@@ -25,7 +25,7 @@ from chatvault.db import (
 )
 from chatvault.collectors import Source, collect_source, discover_sources
 from chatvault.exporting import ExportTooLarge, create_export, estimate_export
-from chatvault.importing import detect_import_kind, preview, run_archive_import, run_import
+from chatvault.importing import candidate_exports, detect_import_kind, preview, run_archive_import, run_import
 from chatvault.ingestion import import_batch, refresh_session_aggregates
 from chatvault.parsers import (
     parse_claude_jsonl,
@@ -771,6 +771,62 @@ class ArchiveMergeTests(unittest.TestCase):
             self.assertEqual(result["duplicates"], 0)
         finally:
             path.unlink(missing_ok=True)
+
+    def test_csv_field_larger_than_stdlib_limit(self):
+        # Tool results / web-search dumps exceed csv's 128 KiB default and used
+        # to abort preview and import with "field larger than field limit".
+        big = "x" * 400_000
+        source = Path(self.temp.name) / "big-source.db"
+        target = Path(self.temp.name) / "big-target.db"
+        init_db(source)
+        init_db(target)
+        with connection(source) as conn:
+            import_batch(conn, "codex", {
+                "source_path": "big/session.jsonl",
+                "sessions": [{"external_id": "s-big", "title": "超长工具结果"}],
+                "events": [{
+                    "session_external_id": "s-big", "type": "tool_result",
+                    "source_event_id": "big-1", "sequence": 1,
+                    "timestamp": "2026-11-04T02:00:00Z", "content": big,
+                }],
+                "errors": [],
+            })
+            conn.commit()
+            export = create_export(conn, format="bundle", agent="codex")
+        path = Path(export["path"])
+        try:
+            info = preview(path, db_path=target)
+            self.assertEqual(info["totals"]["events"], 1)
+            result = run_archive_import(path, db_path=target)
+            self.assertEqual(result["events_inserted"], 1)
+            with connection(target) as conn:
+                stored = conn.execute(
+                    "SELECT content FROM events WHERE session_id IN "
+                    "(SELECT id FROM sessions WHERE external_id = 's-big')"
+                ).fetchone()["content"]
+            self.assertEqual(len(stored), len(big))
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_candidates_find_bundle_in_subdirectory(self):
+        data_dir = Path(self.temp.name) / "data"
+        data_dir.mkdir()
+        nested = data_dir / "other_data"
+        nested.mkdir()
+        init_db(data_dir / "agenttrail.db")
+        with connection(self.source_db) as conn:
+            export = create_export(conn, format="bundle", agent="codex")
+        bundle = Path(export["path"])
+        placed = nested / bundle.name
+        try:
+            placed.write_bytes(bundle.read_bytes())
+            items = candidate_exports(data_dir / "agenttrail.db")
+            archives = [item for item in items if item["kind"] == "archive"]
+            self.assertEqual([item["name"] for item in archives], [bundle.name])
+            self.assertEqual(archives[0]["events"], 4)
+        finally:
+            bundle.unlink(missing_ok=True)
+            placed.unlink(missing_ok=True)
 
     def test_unknown_agent_is_skipped(self):
         path = Path(self.temp.name) / "ghost.csv"
