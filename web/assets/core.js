@@ -321,14 +321,40 @@ export function setView(html, setup) {
   if (setup) {
     try { setup(view, viewAbort.signal); } catch (error) { console.error(error); }
   }
+  fitCharts(view);
+}
+
+// Charts are generated as strings, so their width is only known after mounting.
+// Re-draw each one against its real track width (and again after a resize).
+export function fitCharts(root) {
+  const scope = root && root.querySelectorAll ? root : document;
+  scope.querySelectorAll('[data-chart]').forEach(function (host) {
+    const job = chartJobs.get(host.dataset.chart);
+    if (!job) return;
+    const width = Math.round(host.clientWidth);
+    if (!width || width < 240) return;
+    const svg = host.querySelector('svg');
+    if (!svg) return;
+    const current = Number((svg.getAttribute('viewBox') || '').split(/[\s,]+/)[2]) || 0;
+    if (Math.abs(current - width) < 8) return;
+    host.innerHTML = drawStackedChart(job.daily, job.agents, job.options, width);
+  });
+}
+
+if (typeof window !== 'undefined') {
+  let chartRaf = 0;
+  window.addEventListener('resize', function () {
+    if (chartRaf) cancelAnimationFrame(chartRaf);
+    chartRaf = requestAnimationFrame(function () { chartRaf = 0; fitCharts(document); });
+  });
 }
 
 export function skeletonPage(headline) {
   return '<div class="page">' +
     '<div class="page-head"><div class="page-head-main"><div class="skeleton skeleton-text" style="width:110px"></div><div class="skeleton skeleton-title" style="margin-top:10px"></div><div class="skeleton skeleton-text" style="width:320px"></div></div></div>' +
     '<div class="kpi-grid">' + new Array(4).fill('<div class="skeleton skeleton-card"></div>').join('') + '</div>' +
-    '<div class="overview-grid" style="margin-top:14px"><div class="skeleton" style="height:320px"></div><div class="skeleton" style="height:320px"></div></div>' +
-    '<div class="skeleton" style="height:240px;margin-top:14px"></div>' +
+    '<div class="overview-grid"><div class="skeleton" style="height:320px"></div><div class="skeleton" style="height:320px"></div></div>' +
+    '<div class="skeleton" style="height:240px"></div>' +
     '<div class="sr-only">' + esc(headline || '加载中') + '</div></div>';
 }
 
@@ -337,7 +363,7 @@ export function emptyState(title, description, iconName) {
 }
 
 export function errorPage(message, actionLabel) {
-  return '<div class="page"><div class="panel"><div class="panel-body">' + emptyState('加载失败', message || '请稍后重试', 'alert-circle') + '<div style="text-align:center"><button class="btn btn-secondary btn-sm" data-action="reload-page">' + icon('refresh') + '<span>' + esc(actionLabel || '重新加载') + '</span></button></div></div></div></div>';
+  return '<div class="page"><div class="panel"><div class="panel-body"><div class="empty-panel">' + emptyState('加载失败', message || '请稍后重试', 'alert-circle') + '<button class="btn btn-secondary btn-sm" data-action="reload-page">' + icon('refresh') + '<span>' + esc(actionLabel || '重新加载') + '</span></button></div></div></div></div>';
 }
 
 export function pageHead(options) {
@@ -381,12 +407,26 @@ export function legendSwatch(color) {
   return '<span class="legend-swatch" style="--legend-color:' + attr(color) + '"></span>';
 }
 
+const chartJobs = new Map();
+let chartSeq = 0;
+
+// Estimated track width before the chart is in the DOM. fitCharts() replaces it with
+// the measured width right after mount, so tick text always renders at ~10px.
+function estimateChartWidth() {
+  if (typeof window === 'undefined') return 760;
+  const narrow = window.innerWidth < 760;
+  return Math.max(280, Math.min(880, window.innerWidth - (narrow ? 60 : 420)));
+}
+
 export function stackedChart(daily, agents, options) {
   const opts = options || {};
-  // match the viewBox to the available track width so tick labels keep a readable size
-  const narrow = typeof window !== 'undefined' && window.innerWidth < 760;
-  const avail = typeof window === 'undefined' ? 880 : Math.max(300, Math.min(880, window.innerWidth - (narrow ? 40 : 110)));
-  const width = opts.width || avail;
+  const id = 'chart-' + (++chartSeq);
+  chartJobs.set(id, { daily: daily, agents: agents, options: opts });
+  return '<div class="chart-host" data-chart="' + id + '">' + drawStackedChart(daily, agents, opts, opts.width || estimateChartWidth()) + '</div>';
+}
+
+function drawStackedChart(daily, agents, options, width) {
+  const opts = options || {};
   const height = opts.height || 260;
   const margin = { top: 14, right: 12, bottom: 26, left: 38 };
   const plotW = width - margin.left - margin.right;

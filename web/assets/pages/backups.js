@@ -36,7 +36,7 @@ function draw(data, signal) {
       '<td class="cell-actions"><a class="btn btn-ghost btn-xs" href="/api/backups/' + item.id + '/download"' + (item.exists === false ? ' aria-disabled="true" style="pointer-events:none;opacity:.4"' : '') + '>' + icon('download') + '<span>下载</span></a><button class="btn btn-ghost btn-xs danger" data-backup-delete="' + item.id + '" data-name="' + attr(item.filename) + '">' + icon('trash') + '</button></td></tr>';
   }).join('') : '<tr><td colspan="5" class="table-empty">还没有备份。建议在首次同步完成后创建第一份快照。</td></tr>';
 
-  const table = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">备份历史</h2><p class="panel-sub">保留最近 ' + Number(config.backup_retention || 7) + ' 份自动备份，旧文件会自动清理</p></div><span class="badge neutral">' + num(stats.count) + ' FILES</span></div><div class="table-wrap" style="margin-top:8px"><table class="data-table"><thead><tr><th>文件</th><th class="num">大小</th><th>创建时间</th><th>状态</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  const table = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">备份历史</h2><p class="panel-sub">保留最近 ' + Number(config.backup_retention || 7) + ' 份自动备份，旧文件会自动清理</p></div><span class="badge neutral">' + num(stats.count) + ' FILES</span></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>文件</th><th class="num">大小</th><th>创建时间</th><th>状态</th><th class="cell-actions"></th></tr></thead><tbody>' + rows + '</tbody></table></div></div></section>';
 
   const restore = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">恢复与迁移</h2><p class="panel-sub">离线恢复流程 · 请先停止服务</p></div><span class="badge amber">MANUAL</span></div><div class="panel-body"><div class="flow-steps">' +
     '<div class="flow-step"><span>STEP 01</span><strong>停止服务</strong><p>在运行服务的终端按 Ctrl+C，确保没有并发写入。</p></div>' +
@@ -44,7 +44,7 @@ function draw(data, signal) {
     '<div class="flow-step"><span>STEP 03</span><strong>替换数据库</strong><p>移除 data/agenttrail.db 及 -wal / -shm 文件后替换。</p></div>' +
     '<div class="flow-step"><span>STEP 04</span><strong>重启服务</strong><p>启动后自动执行 schema 兼容检查并恢复登录会话。</p></div>' +
     '<div class="flow-step"><span>STEP 05</span><strong>核对数据</strong><p>在「总览」与「日志」中确认会话数量与最近同步状态。</p></div>' +
-    '</div><div class="storage-note" style="margin-top:14px">备份包含密码哈希，请存放在受控目录；系统不会将备份上传到任何云端。</div></div></section>';
+    '</div><div class="storage-note">备份包含密码哈希，请存放在受控目录；系统不会将备份上传到任何云端。</div></div></section>';
 
   const header = pageHead({
     eyebrow: 'MAINTENANCE / SQLITE SNAPSHOTS',

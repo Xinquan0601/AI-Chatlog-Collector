@@ -252,7 +252,7 @@ export async function render(params, token, signal) {
         '<section class="panel export-panel">' +
           '<div class="panel-head"><div><h2 class="panel-title">日期范围</h2>' +
             '<p class="panel-sub">起止日期均为闭区间：起始日 00:00:00.000 与结束日 23:59:59.999 都会被包含。</p></div></div>' +
-          '<div class="panel-body">' +
+          '<div class="panel-body stack">' +
             '<div class="filter-chips export-range-chips" id="range-chips">' +
               RANGE_PRESETS.map(function (preset) {
                 return '<button class="chip" type="button" data-range="' + preset.key + '">' + esc(preset.label) +
@@ -260,7 +260,7 @@ export async function render(params, token, signal) {
               }).join('') +
               '<span class="chip" data-custom-chip hidden>自定义</span>' +
             '</div>' +
-            '<div class="export-dates" style="margin-top:12px">' +
+            '<div class="export-dates">' +
               '<label class="filter-field"><span class="filter-label">起始日期（含当天 00:00:00.000）</span>' +
                 '<input class="input" type="date" id="export-from" data-date="from" value="' + attr(st.from) + '"></label>' +
               '<label class="filter-field"><span class="filter-label">结束日期（含当天 23:59:59.999）</span>' +
@@ -274,18 +274,17 @@ export async function render(params, token, signal) {
         '<section class="panel export-panel">' +
           '<div class="panel-head"><div><h2 class="panel-title">消息范围</h2>' +
             '<p class="panel-sub">可多选；组内为「或」关系，默认四类全部导出。</p></div>' +
-            '<div class="panel-actions"><span class="badge neutral" data-type-selected>4 / 4 类</span></div></div>' +
-          '<div class="panel-body">' +
+            '<div class="panel-actions"><span class="mode-state" data-mode-state></span><span class="badge neutral" data-type-selected>4 / 4 类</span></div></div>' +
+          '<div class="panel-body stack">' +
             '<div class="export-modes" data-mode-group>' +
               MODE_PRESETS.map(function (preset) {
                 return '<button class="mode-card" type="button" data-mode="' + preset.key + '">' +
                   '<span class="mode-card-head">' + icon(preset.key === 'full' ? 'layers' : 'message') + '<strong>' + esc(preset.label) + '</strong></span>' +
                   '<span class="mode-card-hint">' + esc(preset.hint) + '</span></button>';
               }).join('') +
-              '<span class="mode-state" data-mode-state></span>' +
             '</div>' +
-            '<div class="pick-grid type-pick-grid" style="margin-top:12px">' + typeCards + '</div>' +
-            '<label class="filter-field export-keyword" style="margin-top:12px"><span class="filter-label">内容关键词（可选，匹配消息正文或工具名）</span>' +
+            '<div class="pick-grid type-pick-grid">' + typeCards + '</div>' +
+            '<label class="filter-field export-keyword"><span class="filter-label">内容关键词（可选，匹配消息正文或工具名）</span>' +
               '<input class="input" type="search" id="export-keyword" placeholder="留空表示不限制内容" value="' + attr(st.keyword) + '"></label>' +
           '</div>' +
         '</section>' +

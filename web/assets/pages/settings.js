@@ -70,7 +70,7 @@ function draw(settingsData, usersData, signal) {
     '<div class="inline-switch" style="padding-top:0"><div class="inline-switch-copy"><strong>当前登录</strong><span>' + esc(state.user.username) + ' · ' + (state.user.role === 'admin' ? '管理员' : '只读成员') + ' · ' + esc(state.settings.timezone || 'Asia/Shanghai') + '</span></div><button class="btn btn-secondary btn-sm" data-settings-password>' + icon('key') + '<span>修改密码</span></button></div>' +
     '<div class="inline-switch"><div class="inline-switch-copy"><strong>会话保护</strong><span>HttpOnly Cookie · SameSite=Strict · 同源请求头校验 · 登录限流</span></div><span class="badge accent"><span class="dot"></span>已启用</span></div>' +
     '<div class="inline-switch"><div class="inline-switch-copy"><strong>审计轨迹</strong><span>登录、配置、导出与备份操作写入审计表，不提供修改接口。</span></div><a class="btn btn-ghost btn-xs" href="#/logs?tab=audit">查看审计' + icon('arrow-right') + '</a></div>' +
-    '<div class="storage-note" style="margin-top:14px">初始管理员为 <b class="mono">admin</b>。若仍在使用默认密码 <b class="mono">admin123</b>，请立即修改。部署在非本机环境时，应同时启用 HTTPS 反向代理并设置 <b class="mono">AGENTTRAIL_SECURE_COOKIE=1</b>。</div>' +
+    '<div class="storage-note">初始管理员为 <b class="mono">admin</b>。若仍在使用默认密码 <b class="mono">admin123</b>，请立即修改。部署在非本机环境时，应同时启用 HTTPS 反向代理并设置 <b class="mono">AGENTTRAIL_SECURE_COOKIE=1</b>。</div>' +
     '</div></section>';
 
   const pathsList = '<div class="path-list">' + [
@@ -88,7 +88,7 @@ function draw(settingsData, usersData, signal) {
     actions: '<button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button>'
   });
 
-  setView('<div class="page">' + header + '<div class="settings-layout">' + nav + '<div>' + general + collection + backup + usersSection + security + system + '</div></div></div>', function (root, sig) {
+  setView('<div class="page">' + header + '<div class="settings-layout">' + nav + '<div class="settings-panels">' + general + collection + backup + usersSection + security + system + '</div></div></div>', function (root, sig) {
     root.addEventListener('click', function (event) {
       const target = event.target.closest('[data-settings-target]');
       if (target) {
@@ -215,7 +215,7 @@ function openEditUser(user) {
   const instance = showModal({
     title: '管理成员 · ' + user.username,
     subtitle: '角色变更与密码重置会立即生效，并写入审计日志。',
-    body: '<div class="meta-list" style="margin-bottom:12px"><div class="meta-item"><span class="meta-key">用户名</span><span class="meta-value">' + esc(user.username) + '</span></div><div class="meta-item"><span class="meta-key">创建时间</span><span class="meta-value mono">' + fmtFull(user.created_at) + '</span></div></div><form id="user-edit-form"><label class="field-label" for="edit-role">角色</label><select class="select" id="edit-role"><option value="viewer"' + (user.role === 'viewer' ? ' selected' : '') + '>只读成员</option><option value="admin"' + (user.role === 'admin' ? ' selected' : '') + '>管理员</option></select><div class="inline-switch"><div class="inline-switch-copy"><strong>账号启用</strong><span>停用后该用户所有登录会话立即失效。</span></div><label class="switch"><input id="edit-active" type="checkbox"' + (user.active ? ' checked' : '') + '><span></span></label></div><label class="field-label" for="edit-password">重置密码 <span style="color:var(--muted-2);font-weight:400">（留空不修改）</span></label><input class="input" id="edit-password" type="password" autocomplete="new-password" minlength="8" placeholder="至少 8 个字符"></form>',
+    body: '<div class="meta-list"><div class="meta-item"><span class="meta-key">用户名</span><span class="meta-value">' + esc(user.username) + '</span></div><div class="meta-item"><span class="meta-key">创建时间</span><span class="meta-value mono">' + fmtFull(user.created_at) + '</span></div></div><form id="user-edit-form"><label class="field-label" for="edit-role">角色</label><select class="select" id="edit-role"><option value="viewer"' + (user.role === 'viewer' ? ' selected' : '') + '>只读成员</option><option value="admin"' + (user.role === 'admin' ? ' selected' : '') + '>管理员</option></select><div class="inline-switch"><div class="inline-switch-copy"><strong>账号启用</strong><span>停用后该用户所有登录会话立即失效。</span></div><label class="switch"><input id="edit-active" type="checkbox"' + (user.active ? ' checked' : '') + '><span></span></label></div><label class="field-label" for="edit-password">重置密码 <span class="field-label-note">（留空不修改）</span></label><input class="input" id="edit-password" type="password" autocomplete="new-password" minlength="8" placeholder="至少 8 个字符"></form>',
     footer: '<button class="btn btn-ghost" type="button" data-modal-close>取消</button><button class="btn btn-primary" type="submit" form="user-edit-form">保存变更</button>',
     onMount: function (element) {
       element.querySelector('#user-edit-form').addEventListener('submit', async function (event) {

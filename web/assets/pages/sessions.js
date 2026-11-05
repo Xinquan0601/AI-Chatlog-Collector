@@ -61,9 +61,9 @@ function draw(data, query, signal) {
     (hasFilter ? '<a class="btn btn-ghost btn-sm" href="#/sessions">清除</a>' : '') +
     '<button class="btn btn-ghost btn-sm" type="button" data-export-sessions>' + icon('download') + '<span>导出</span></button></div></form>';
 
-  const quick = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap"><div class="filter-chips"><button class="chip ' + (activeRange === '24h' ? 'active' : '') + '" data-range="24h">24 小时</button><button class="chip ' + (activeRange === '7d' ? 'active' : '') + '" data-range="7d">7 天</button><button class="chip ' + (activeRange === '30d' ? 'active' : '') + '" data-range="30d">30 天</button><button class="chip ' + (activeRange === 'all' ? 'active' : '') + '" data-range="all">全部时间</button></div><div class="section-meta mono">' + num(data.total) + ' SESSIONS · PAGE ' + data.page + '/' + data.pages + '</div></div>';
+  const quick = '<div class="toolbar-row"><div class="filter-chips"><button class="chip ' + (activeRange === '24h' ? 'active' : '') + '" data-range="24h">24 小时</button><button class="chip ' + (activeRange === '7d' ? 'active' : '') + '" data-range="7d">7 天</button><button class="chip ' + (activeRange === '30d' ? 'active' : '') + '" data-range="30d">30 天</button><button class="chip ' + (activeRange === 'all' ? 'active' : '') + '" data-range="all">全部时间</button></div><div class="section-meta mono">' + num(data.total) + ' SESSIONS · PAGE ' + data.page + '/' + data.pages + '</div></div>';
 
-  const table = '<section class="panel"><div class="table-wrap"><table class="data-table fixed sessions-table"><thead><tr><th>会话</th><th>Agent</th><th>开始时间</th><th class="col-wide">用户 / 助手 / 工具</th><th class="num">事件</th><th class="num col-wide">Token</th><th></th></tr></thead><tbody>' + bodyRows + '</tbody></table></div></section>' +
+  const table = '<section class="panel"><div class="table-wrap"><table class="data-table fixed sessions-table"><thead><tr><th>会话</th><th>Agent</th><th>开始时间</th><th class="col-wide">用户 / 助手 / 工具</th><th class="num">事件</th><th class="num col-wide">Token</th><th class="cell-actions"></th></tr></thead><tbody>' + bodyRows + '</tbody></table></div></section>' +
     pagination(data, 'sessions', query);
 
   const header = pageHead({
@@ -73,7 +73,7 @@ function draw(data, query, signal) {
     actions: '<a class="btn btn-secondary btn-sm" href="#/analytics">' + icon('chart') + '<span>统计分析</span></a><button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button>'
   });
 
-  const emptyHint = !rows.length && !hasFilter ? '<div style="margin-top:14px">' + emptyState('档案库还是空的', '先在 Agent 接入页配置数据源，再触发一次全量同步。', 'message') + '<div style="text-align:center"><a class="btn btn-primary btn-sm" href="#/agents">前往 Agent 接入</a></div></div>' : '';
+  const emptyHint = !rows.length && !hasFilter ? '<div class="empty-panel">' + emptyState('档案库还是空的', '先在 Agent 接入页配置数据源，再触发一次全量同步。', 'message') + '<a class="btn btn-primary btn-sm" href="#/agents">前往 Agent 接入</a></div>' : '';
 
   setView('<div class="page">' + header + quick + filterBar + emptyHint + table + '</div>', function (root, sig) {
     root.addEventListener('submit', function (event) {

@@ -66,7 +66,7 @@ function draw(data, query, signal) {
     return '<button class="chip ' + (activeRange === item.key ? 'active' : '') + '" data-analytics-range="' + item.key + '">' + item.label + '</button>';
   }).join('') + (activeRange === 'custom' ? '<span class="chip active">自定义</span>' : '') + '</div>';
 
-  const filterBar = '<form id="analytics-filter-form" class="filter-bar" style="margin-top:10px">' +
+  const filterBar = '<form id="analytics-filter-form" class="filter-bar">' +
     '<div class="filter-field"><span class="filter-label">AGENT</span><select class="select" id="analytics-agent">' + agentOptions(query.agent) + '</select></div>' +
     '<div class="filter-field"><span class="filter-label">FROM</span><input class="input" id="analytics-from" type="datetime-local" value="' + attr(localInput(query.from)) + '"></div>' +
     '<div class="filter-field"><span class="filter-label">TO</span><input class="input" id="analytics-to" type="datetime-local" value="' + attr(localInput(query.to)) + '"></div>' +
@@ -88,22 +88,22 @@ function draw(data, query, signal) {
   const activity = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">事件趋势</h2><p class="panel-sub">按 Agent 分解的每日规范化事件</p></div><div class="panel-actions"><div class="chart-legend">' + legend + '</div></div></div><div class="panel-body">' + stackedChart(daily, agents, { height: 250 }) + '</div></section>';
 
   const typePanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">结构分布</h2><p class="panel-sub">四类规范结构占比</p></div><span class="badge neutral">' + num(totalTypes) + ' EVENTS</span></div><div class="panel-body"><div class="donut-layout">' + donutSvg(donutItems, totalTypes, 'EVENTS') + '<div class="donut-legend">' + typeLegend(typeCounts) + '</div></div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)"><div class="analytics-kpi"><span>消息总量</span><b>' + compact(typeCounts.user_message + typeCounts.assistant_message) + '</b><small>USER + ASSISTANT</small></div><div class="analytics-kpi"><span>工具链路</span><b>' + compact(typeCounts.tool_call + typeCounts.tool_result) + '</b><small>CALL + RESULT</small></div></div></div></section>';
+    '<div class="analytics-kpi-row"><div class="analytics-kpi"><span>消息总量</span><b>' + compact(typeCounts.user_message + typeCounts.assistant_message) + '</b><small>USER + ASSISTANT</small></div><div class="analytics-kpi"><span>工具链路</span><b>' + compact(typeCounts.tool_call + typeCounts.tool_result) + '</b><small>CALL + RESULT</small></div></div></div></section>';
 
   const maxAgentEvents = Math.max.apply(null, byAgent.map(function (row) { return Number(row.events || 0); }).concat([1]));
   const agentPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Agent 分布</h2><p class="panel-sub">事件规模与会话覆盖</p></div><span class="badge neutral">' + byAgent.length + ' ACTIVE</span></div><div class="panel-body">' +
     (byAgent.length ? '<div class="agent-bars">' + byAgent.map(function (row) {
       return '<div class="agent-bar-row">' + agentGlyph(row.agent_key) + '<span class="agent-bar-name">' + esc(row.name) + '</span><div class="agent-bar-track"><i style="width:' + Math.max(3, Math.round(Number(row.events || 0) * 100 / maxAgentEvents)) + '%;--bar-color:' + attr(row.color) + '"></i></div><span class="agent-bar-value">' + compact(row.events) + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between;margin:-2px 0 4px 102px;font-size:10px;color:var(--muted-2)"><span>' + num(row.sessions) + ' 会话 · 平均 ' + num(row.avg_events) + '</span><span class="mono">' + compact(Number(row.tokens_input || 0) + Number(row.tokens_output || 0)) + ' tok</span></div>';
+        '<div class="agent-bar-sub"><span>' + num(row.sessions) + ' 会话 · 平均 ' + num(row.avg_events) + '</span><span class="mono">' + compact(Number(row.tokens_input || 0) + Number(row.tokens_output || 0)) + ' tok</span></div>';
     }).join('') + '</div>' : emptyState('暂无 Agent 数据', '当前筛选范围内没有采集事件。', 'nodes')) + '</div></section>';
 
   const toolMax = Math.max.apply(null, tools.map(function (tool) { return Number(tool.calls || 0); }).concat([1]));
-  const toolsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">工具排行</h2><p class="panel-sub">调用量与异常分布</p></div><span class="badge neutral">TOP ' + Math.min(12, tools.length) + '</span></div><div class="panel-body" style="padding-top:8px">' +
+  const toolsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">工具排行</h2><p class="panel-sub">调用量与异常分布</p></div><span class="badge neutral">TOP ' + Math.min(12, tools.length) + '</span></div><div class="panel-body flush">' +
     (tools.length ? '<div class="table-wrap"><table class="data-table fixed tools-table"><thead><tr><th>工具</th><th class="num">调用</th><th>占比</th><th class="num">异常</th></tr></thead><tbody>' + tools.map(function (tool) {
       return '<tr><td class="tool-name-cell">' + esc(tool.tool_name) + '</td><td class="num">' + num(tool.calls) + '</td><td><div class="bar-track"><i style="width:' + Math.max(4, Math.round(Number(tool.calls || 0) * 100 / toolMax)) + '%"></i></div></td><td class="num ' + (Number(tool.errors || 0) ? 'text-danger' : '') + '">' + num(tool.errors || 0) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : emptyState('暂无工具调用', '当前筛选范围内没有工具事件。', 'tool')) + '</div></section>';
 
-  const projectsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">项目覆盖</h2><p class="panel-sub">事件最活跃的工作区</p></div><a class="btn btn-ghost btn-xs" href="#/sessions">浏览会话' + icon('arrow-right') + '</a></div><div class="panel-body" style="padding-top:6px">' +
+  const projectsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">项目覆盖</h2><p class="panel-sub">事件最活跃的工作区</p></div><a class="btn btn-ghost btn-xs" href="#/sessions">浏览会话' + icon('arrow-right') + '</a></div><div class="panel-body flush">' +
     (projects.length ? '<div class="table-wrap"><table class="data-table fixed projects-table"><thead><tr><th>项目</th><th class="num">会话</th><th class="num">事件</th></tr></thead><tbody>' + projects.map(function (project) {
       return '<tr><td class="cell-main">' + esc(project.project) + '</td><td class="num">' + num(project.sessions) + '</td><td class="num">' + num(project.events) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : emptyState('暂无项目信息', '来源记录未提供工作区元数据。', 'folder')) + '</div></section>';

@@ -29,7 +29,7 @@ export async function render(params, token, signal) {
     if (!isCurrent(token)) return;
     setView('<div class="page"><div class="panel"><div class="panel-body">' +
       emptyState('无法读取导入信息', error.message, 'alert-circle') +
-      '<div style="text-align:center"><button class="btn btn-secondary btn-sm" data-action="reload-page">重新加载</button></div></div></div></div>');
+      '<div class="empty-panel"><button class="btn btn-secondary btn-sm" data-action="reload-page">重新加载</button></div></div></div></div>');
   }
 }
 
@@ -260,7 +260,7 @@ function archivePreviewHtml(data) {
     '<div class="task-stat"><span>已存在</span><b>' + num(totals.duplicate_events) + '</b><small class="dim">DUPLICATE</small></div>' +
     '<div class="task-stat"><span>会话</span><b>' + num(totals.sessions) + '</b><small class="dim">' + num(totals.new_sessions) + ' 新增 / ' + num(totals.merged_sessions) + ' 合并</small></div></div>' +
     filterLine + warnings + range +
-    '<div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr><th>Agent</th><th class="num">事件</th><th class="num">新增</th><th class="num">重复</th><th class="num">会话</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="table-wrap"><table class="data-table"><thead><tr><th>Agent</th><th class="num">事件</th><th class="num">新增</th><th class="num">重复</th><th class="num">会话</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
     (agents.length ? '' : emptyState('档案包里没有可导入的事件', '确认导出时选择的 Agent 与时间范围，以及本机是否已接入相同 Agent。', 'archive')) + '</div>';
 }
 
@@ -293,7 +293,7 @@ function previewHtml(data) {
     '<div class="task-stat"><span>工具调用 / 结果</span><b>' + num(totals.tool_calls) + ' / ' + num(totals.tool_results) + '</b><small class="dim">TOOL EVENTS</small></div>' +
     '<div class="task-stat"><span>推理片段</span><b>' + num(totals.reasoning) + '</b><small class="dim">DEFAULT SKIP</small></div></div>' +
     warnings +
-    '<div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr><th>旧来源</th><th>Agent</th><th class="num">会话</th><th class="num">消息</th><th class="num">工具调用 / 结果</th><th class="num">推理</th><th>时间范围</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="table-wrap"><table class="data-table"><thead><tr><th>旧来源</th><th>Agent</th><th class="num">会话</th><th class="num">消息</th><th class="num">工具调用 / 结果</th><th class="num">推理</th><th>时间范围</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
     (sources.length ? '' : emptyState('导出库中没有会话', '确认文件是否来自旧版 chatlog 工具。', 'database')) + '</div>';
 }
 

@@ -81,11 +81,11 @@ function draw(data, query, id, signal) {
     '<div class="detail-actions"><button class="btn btn-ghost btn-sm" data-copy-link title="复制当前链接">' + icon('copy') + '<span>复制链接</span></button><button class="btn btn-primary btn-sm" data-export-session="' + session.id + '" data-export-title="' + attr(session.title || '') + '">' + icon('download') + '<span>导出本会话</span></button></div></div></div>';
 
   const summary = '<div class="summary-strip">' +
-    '<div class="summary-cell"><b>' + num(counts.user_message) + '</b><span>用户消息</span></div>' +
-    '<div class="summary-cell"><b>' + num(counts.assistant_message) + '</b><span>助手消息</span></div>' +
-    '<div class="summary-cell"><b>' + num(counts.tool_call) + '</b><span>工具调用</span></div>' +
-    '<div class="summary-cell"><b>' + num(counts.tool_result) + '</b><span>工具结果</span></div>' +
-    '<div class="summary-cell"><b>' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</b><span>Token 合计</span></div></div>';
+    '<div class="summary-cell"><span>用户消息</span><b>' + num(counts.user_message) + '</b></div>' +
+    '<div class="summary-cell"><span>助手消息</span><b>' + num(counts.assistant_message) + '</b></div>' +
+    '<div class="summary-cell"><span>工具调用</span><b>' + num(counts.tool_call) + '</b></div>' +
+    '<div class="summary-cell"><span>工具结果</span><b>' + num(counts.tool_result) + '</b></div>' +
+    '<div class="summary-cell"><span>Token 合计</span><b>' + compact(Number(session.tokens_input || 0) + Number(session.tokens_output || 0)) + '</b></div></div>';
 
   const typeToggles = '<div class="type-filter" role="group" aria-label="按事件类型筛选">' + EVENT_TYPES.map(function (type) {
     const checked = query.types.indexOf(type) >= 0;
@@ -136,7 +136,7 @@ function draw(data, query, id, signal) {
     (meta.originator ? metaItem('来源客户端', meta.originator) : '') +
     '</div></div></section>';
 
-  const toolsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">工具使用</h2><p class="panel-sub">本会话调用的工具</p></div></div><div class="panel-body" style="padding-top:13px">' +
+  const toolsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">工具使用</h2><p class="panel-sub">本会话调用的工具</p></div></div><div class="panel-body">' +
     (tools.length ? '<div class="tools-list">' + tools.map(function (tool) {
       const max = Math.max.apply(null, tools.map(function (item) { return Number(item.calls || 0); }).concat([1]));
       return '<div class="tool-stat"><span>' + esc(tool.tool_name) + '</span><div class="tool-stat-bar"><i style="width:' + Math.max(4, Math.round(Number(tool.calls || 0) * 100 / max)) + '%"></i></div><b>' + num(tool.calls) + '</b></div>';
@@ -284,8 +284,8 @@ async function openEvent(eventId) {
       : '<div class="full-content" id="event-full-content">' + esc(content || '（空）') + '</div>';
     const body = '<div class="meta-list" style="margin-bottom:12px"><div class="meta-item"><span class="meta-key">事件类型</span><span class="meta-value">' + esc(eventTypeLabel(event.type)) + ' · ' + esc(event.agent_key) + '</span></div><div class="meta-item"><span class="meta-key">时间</span><span class="meta-value mono">' + fmtFull(event.timestamp) + '</span></div>' + (event.tool_name ? '<div class="meta-item"><span class="meta-key">工具</span><span class="meta-value mono">' + esc(event.tool_name) + ' · ' + esc(event.tool_status || '—') + '</span></div>' : '') + '</div>' +
       '<div class="modal-section-title">完整内容 · ' + num(content.length) + ' 字符</div>' + contentHtml +
-      (input !== null && input !== undefined ? '<details class="tool-details" style="margin-top:12px"><summary>工具入参 JSON</summary><pre class="tool-json">' + esc(prettyJson(input)) + '</pre></details>' : '') +
-      (raw !== null && raw !== undefined ? '<details class="tool-details" style="margin-top:9px"><summary>原始记录</summary><pre class="tool-json">' + esc(prettyJson(raw)) + '</pre></details>' : '');
+      (input !== null && input !== undefined ? '<details class="tool-details"><summary>工具入参 JSON</summary><pre class="tool-json">' + esc(prettyJson(input)) + '</pre></details>' : '') +
+      (raw !== null && raw !== undefined ? '<details class="tool-details"><summary>原始记录</summary><pre class="tool-json">' + esc(prettyJson(raw)) + '</pre></details>' : '');
     const instance = showModal({
       title: '事件完整内容',
       subtitle: '大字段不会进入列表接口，展开后按需加载。',

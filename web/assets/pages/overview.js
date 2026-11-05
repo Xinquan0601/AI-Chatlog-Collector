@@ -49,7 +49,7 @@ function draw(data) {
   const toolMax = Math.max.apply(null, tools.map(function (tool) { return Number(tool.calls || 0); }).concat([1]));
   const topTools = '<section class="panel">' +
     '<div class="panel-head"><div><h2 class="panel-title">工具热度</h2><p class="panel-sub">调用次数与成功 / 异常分布</p></div><div class="panel-actions"><a class="btn btn-ghost btn-xs" href="#/analytics">分析详情' + icon('arrow-right') + '</a></div></div>' +
-    '<div class="panel-body" style="padding-top:12px">' +
+    '<div class="panel-body">' +
     (tools.length ? '<div class="tools-list">' + tools.map(function (tool) {
       const width = Math.max(4, Math.round(Number(tool.calls || 0) * 100 / toolMax));
       const errorRate = Number(tool.calls || 0) ? Math.round(Number(tool.errors || 0) * 100 / Number(tool.calls)) : 0;
@@ -66,7 +66,7 @@ function draw(data) {
       '<div class="job-status">' + statusBadgeForJob(job.status) + '</div></div>';
   }).join('') : emptyState('暂无采集任务', '点击右上角「同步全部」启动第一次采集。', 'activity');
 
-  const jobsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">采集队列</h2><p class="panel-sub">任务进度与最近状态</p></div><div class="panel-actions"><a class="btn btn-ghost btn-xs" href="#/tasks">全部任务' + icon('arrow-right') + '</a></div></div><div class="panel-body" style="padding-top:6px"><div class="job-list">' + jobRows + '</div></div></section>';
+  const jobsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">采集队列</h2><p class="panel-sub">任务进度与最近状态</p></div><div class="panel-actions"><a class="btn btn-ghost btn-xs" href="#/tasks">全部任务' + icon('arrow-right') + '</a></div></div><div class="panel-body"><div class="job-list">' + jobRows + '</div></div></section>';
 
   const storage = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">存储与覆盖</h2><p class="panel-sub">本地 SQLite 档案库</p></div><span class="badge ' + (health === 'ok' ? 'accent' : 'amber') + '"><span class="dot"></span>' + (health === 'ok' ? '运行正常' : '需关注') + '</span></div>' +
     '<div class="panel-body"><div class="storage-visual"><div class="storage-ring"><svg viewBox="0 0 108 108"><circle cx="54" cy="54" r="44" fill="none" stroke="var(--surface-4)" stroke-width="8"/><circle cx="54" cy="54" r="44" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round" stroke-dasharray="' + (2 * Math.PI * 44 * storageRatio / 100).toFixed(1) + ' 276.46"/></svg><div class="storage-center"><strong>' + bytes(storageTotal) + '</strong><span>TOTAL STORAGE</span></div></div>' +

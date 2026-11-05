@@ -83,7 +83,7 @@ function draw(tab, query, data, signal) {
     actions: '<button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button>'
   });
 
-  setView('<div class="page">' + header + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap">' + tabs + '<span class="section-meta mono">' + num(data.total) + ' RECORDS · PAGE ' + data.page + '/' + data.pages + '</span></div>' + filters + table + '</div>', function (root, sig) {
+  setView('<div class="page">' + header + '<div class="toolbar-row">' + tabs + '<span class="section-meta mono">' + num(data.total) + ' RECORDS · PAGE ' + data.page + '/' + data.pages + '</span></div>' + filters + table + '</div>', function (root, sig) {
     root.addEventListener('submit', function (event) {
       const logForm = event.target.closest('#log-filter-form');
       if (logForm) {

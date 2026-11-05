@@ -125,8 +125,8 @@ async function openTask(id) {
     const job = data.item;
     const stats = job.stats || {};
     const body = '<div class="meta-list"><div class="meta-item"><span class="meta-key">Agent</span><span class="meta-value">' + esc(job.agent_name) + '</span></div><div class="meta-item"><span class="meta-key">状态</span><span class="meta-value">' + esc(jobStatus(job.status).label) + ' · ' + Number(job.attempts || 0) + '/' + Number(job.max_attempts || 0) + ' 次尝试</span></div><div class="meta-item"><span class="meta-key">触发方式</span><span class="meta-value">' + esc(job.trigger || 'manual') + '</span></div><div class="meta-item"><span class="meta-key">排队 / 开始 / 结束</span><span class="meta-value mono">' + esc(job.queued_at || '—') + ' → ' + esc(job.started_at || '—') + ' → ' + esc(job.finished_at || '—') + '</span></div></div>' +
-      (job.error ? '<div class="modal-section-title" style="margin-top:15px">错误详情</div><pre class="tool-json" style="color:#ff9aa8">' + esc(job.error) + '</pre>' : '') +
-      '<div class="modal-section-title" style="margin-top:15px">任务统计</div><pre class="tool-json">' + esc(prettyJson(stats)) + '</pre>';
+      (job.error ? '<div class="modal-section-title">错误详情</div><pre class="tool-json" style="color:#ff9aa8">' + esc(job.error) + '</pre>' : '') +
+      '<div class="modal-section-title">任务统计</div><pre class="tool-json">' + esc(prettyJson(stats)) + '</pre>';
     showModal({
       title: '采集任务 #' + job.id,
       subtitle: job.message || '',
