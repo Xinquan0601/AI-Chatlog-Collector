@@ -22,3 +22,9 @@ Thumbs.db
 
 # Temporary QA artifacts
 artifacts/
+
+# Architecture diagram workbench (engine + candidates + receipts)
+.archify/
+
+# Agent workspace metadata / memory
+.workbuddy/
