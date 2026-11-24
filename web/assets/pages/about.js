@@ -74,9 +74,7 @@ export async function render(params, token, signal) {
 
   const html = '<div class="page">' +
     pageHead({
-      eyebrow: 'DOCS / SYSTEM DESIGN',
       title: '架构与文档',
-      subtitle: '迹录是一个本地优先、单进程、无外部服务依赖的 AI 聊天记录管理器。本页给出运行架构、数据模型、适配器映射与主要交互流程。',
       actions: '<span class="badge accent">v' + esc(version) + '</span><span class="badge neutral">' + coverage + ' AGENTS ENABLED</span>'
     }) +
     '<div class="doc-hero panel"><span class="doc-hero-icon">' + icon('book') + '</span><div><h2>从原始轨迹到可分析资产</h2><p>采集层只读访问各 Agent 的本地记录；规范化层将差异收敛为统一的四类事件；服务层负责增量同步、去重、任务调度与失败重试；WebUI 与 REST API 提供检索、统计、导出与运维能力。原始文件永远不会被修改。</p></div></div>' +

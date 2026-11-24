@@ -16,7 +16,6 @@ export const state = {
   route: null,
   renderToken: 0,
   currentSignal: null,
-  analyticsFormat: 'bundle',
   activeJobs: 0,
   importTimer: null,
   jobTimer: null,
@@ -368,12 +367,19 @@ export function errorPage(message, actionLabel) {
 
 export function pageHead(options) {
   return '<div class="page-head"><div class="page-head-main">' +
-    '<div class="page-eyebrow"><span class="pulse-dot"></span>' + options.eyebrow + '</div>' +
+    (options.eyebrow ? '<div class="page-eyebrow"><span class="pulse-dot"></span>' + options.eyebrow + '</div>' : '') +
     '<h1 class="page-title">' + options.title + '</h1>' +
     (options.subtitle ? '<p class="page-sub">' + options.subtitle + '</p>' : '') +
     '</div>' +
     (options.actions ? '<div class="page-actions">' + options.actions + '</div>' : '') +
     '</div>';
+}
+
+// One refresh affordance per page, placed in the page-head actions slot so every
+// page reads the same way. Re-renders the current route without losing its hash.
+export function pageRefresh(label) {
+  const text = label || '刷新页面';
+  return '<button class="icon-btn page-refresh" type="button" data-action="reload-page" title="' + attr(text) + '" aria-label="' + attr(text) + '">' + icon('refresh') + '</button>';
 }
 
 export function kpiCard(options) {

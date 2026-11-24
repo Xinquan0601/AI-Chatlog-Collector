@@ -1,5 +1,5 @@
 import {
-  api, state, isAdmin, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
+  api, state, isAdmin, isCurrent, setView, skeletonPage, pageHead, pageRefresh, emptyState, icon,
   esc, attr, num, bytes, fmtFull, relTime, showToast, showModal, confirmDialog,
   navigate
 } from '../core.js';
@@ -24,7 +24,7 @@ function draw(data, signal) {
   const config = data.config || {};
   const last = items[0];
 
-  const hero = '<div class="backup-hero"><span class="backup-hero-icon">' + icon('database') + '</span><div class="backup-hero-copy"><h2>本地数据库快照</h2><p>使用 SQLite Online Backup API 创建一致性副本，再以 gzip 压缩。备份包含会话、事件、用户、审计与配置；请妥善保管。</p></div><div class="backup-actions"><button class="btn btn-primary" data-backup-create>' + icon('plus') + '<span>立即备份</span></button><button class="btn btn-ghost" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button></div></div>';
+  const hero = '<div class="backup-hero"><span class="backup-hero-icon">' + icon('database') + '</span><div class="backup-hero-copy"><h2>本地数据库快照</h2><p>使用 SQLite 在线备份创建一致性副本并压缩，包含会话、事件、用户、审计与配置。备份含密码哈希，请存放在受控目录。</p></div></div>';
 
   const summary = '<div class="task-summary"><div class="task-stat"><span>备份数量</span><b>' + num(stats.count) + '</b><small class="dim">SNAPSHOTS</small></div><div class="task-stat"><span>占用空间</span><b>' + bytes(stats.size_bytes) + '</b><small class="dim">COMPRESSED</small></div><div class="task-stat"><span>最近备份</span><b style="font-size:13px">' + (stats.last_backup_at ? relTime(stats.last_backup_at) : '还没有备份') + '</b><small class="dim">LAST RUN</small></div><div class="task-stat"><span>自动备份</span><b style="font-size:14px">' + (config.auto_backup_enabled ? '每 ' + Number(config.backup_interval_hours || 24) + ' 小时' : '已关闭') + '</b><small class="dim">RETAIN ' + Number(config.backup_retention || 7) + '</small></div></div>';
 
@@ -47,10 +47,8 @@ function draw(data, signal) {
     '</div><div class="storage-note">备份包含密码哈希，请存放在受控目录；系统不会将备份上传到任何云端。</div></div></section>';
 
   const header = pageHead({
-    eyebrow: 'MAINTENANCE / SQLITE SNAPSHOTS',
     title: '数据备份',
-    subtitle: '保护本地档案库免受误操作、迁移或存储故障影响。备份是完整数据库副本，恢复操作需要手动执行。',
-    actions: '<button class="btn btn-primary btn-sm" data-backup-create>' + icon('plus') + '<span>创建备份</span></button>'
+    actions: pageRefresh() + '<button class="btn btn-primary btn-sm" data-backup-create>' + icon('plus') + '<span>创建备份</span></button>'
   });
 
   setView('<div class="page">' + header + hero + summary + table + restore + '</div>', function (root, sig) {

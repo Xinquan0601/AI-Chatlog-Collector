@@ -227,9 +227,7 @@ export async function render(params, token, signal) {
 
   const html = '<div class="page export-page">' +
     pageHead({
-      eyebrow: 'EXPORT · DATASET BUILDER',
       title: '数据导出',
-      subtitle: '按 Agent、日期与消息类型组合筛选规范事件，导出为可分析的数据集。默认不设限制：全部 Agent、全部日期、全部消息类型。',
       actions: '<button class="btn btn-secondary btn-sm" type="button" data-export-reset>' + icon('rotate-ccw') + '<span>恢复默认</span></button>' +
         '<button class="btn btn-primary btn-sm" type="button" data-export-run>' + icon('download') + '<span>开始导出</span></button>'
     }) +
@@ -237,7 +235,7 @@ export async function render(params, token, signal) {
       '<div class="export-column">' +
         '<section class="panel export-panel">' +
           '<div class="panel-head"><div><h2 class="panel-title">数据来源 · AGENTS</h2>' +
-            '<p class="panel-sub">可多选；组内为「或」关系，默认全部选中且不加来源限制。</p></div>' +
+            '<p class="panel-sub">未选择的 Agent 不参与导出。</p></div>' +
             '<div class="panel-actions">' +
               '<button class="link-btn" type="button" data-agent-bulk="all">全选</button>' +
               '<button class="link-btn" type="button" data-agent-bulk="none">清空</button>' +
@@ -245,13 +243,13 @@ export async function render(params, token, signal) {
             '</div></div>' +
           '<div class="panel-body">' +
             '<div class="pick-grid agent-pick-grid" id="agent-pick-grid">' + agentCards + '</div>' +
-            '<p class="export-note"><span data-agent-selected>' + st.agents.size + '</span> / ' + agents.length + ' 个 Agent 已选。未选择的 Agent 不会出现在导出结果中。</p>' +
+            '<p class="export-note"><span data-agent-selected>' + st.agents.size + '</span> / ' + agents.length + ' 个 Agent 已选</p>' +
           '</div>' +
         '</section>' +
 
         '<section class="panel export-panel">' +
           '<div class="panel-head"><div><h2 class="panel-title">日期范围</h2>' +
-            '<p class="panel-sub">起止日期均为闭区间：起始日 00:00:00.000 与结束日 23:59:59.999 都会被包含。</p></div></div>' +
+            '<p class="panel-sub">起止两天都包含在内。</p></div></div>' +
           '<div class="panel-body stack">' +
             '<div class="filter-chips export-range-chips" id="range-chips">' +
               RANGE_PRESETS.map(function (preset) {
@@ -273,7 +271,7 @@ export async function render(params, token, signal) {
 
         '<section class="panel export-panel">' +
           '<div class="panel-head"><div><h2 class="panel-title">消息范围</h2>' +
-            '<p class="panel-sub">可多选；组内为「或」关系，默认四类全部导出。</p></div>' +
+            '<p class="panel-sub">四类事件可任意组合。</p></div>' +
             '<div class="panel-actions"><span class="mode-state" data-mode-state></span><span class="badge neutral" data-type-selected>4 / 4 类</span></div></div>' +
           '<div class="panel-body stack">' +
             '<div class="export-modes" data-mode-group>' +
@@ -293,7 +291,7 @@ export async function render(params, token, signal) {
       '<aside class="export-column export-side">' +
         '<section class="panel export-panel export-summary-panel">' +
           '<div class="panel-head"><div><h2 class="panel-title">命中概览</h2>' +
-            '<p class="panel-sub">筛选条件变化后自动重新试算。</p></div></div>' +
+            '<p class="panel-sub">条件变化后自动试算。</p></div></div>' +
           '<div class="panel-body">' +
             '<div class="export-summary" data-summary>' +
               '<span class="export-summary-dot"></span>' +
@@ -316,10 +314,6 @@ export async function render(params, token, signal) {
                 '<span class="format-ext">' + esc(item.ext) + '</span>' +
               '</button>';
             }).join('') + '</div>' +
-            '<div class="export-actions">' +
-              '<div class="export-hint">导出遵循下方的<b>筛选规则</b>；文件生成后浏览器会自动下载，临时文件随即清理。</div>' +
-              '<button class="btn btn-primary btn-sm" type="button" data-export-run>' + icon('download') + '<span>开始导出</span></button>' +
-            '</div>' +
             '<p class="export-error" data-export-error hidden></p>' +
           '</div>' +
         '</section>' +
@@ -327,50 +321,35 @@ export async function render(params, token, signal) {
     '</div>' +
 
     '<section class="panel export-rules">' +
-      '<div class="panel-head"><div><h2 class="panel-title">规则说明</h2>' +
-        '<p class="panel-sub">默认值、快捷选项联动、日期校验与内容筛选的完整定义。</p></div></div>' +
+      '<div class="panel-head"><div><h2 class="panel-title">导出规则</h2>' +
+        '<p class="panel-sub">默认值、快捷联动与筛选语义</p></div></div>' +
       '<div class="panel-body export-rules-body">' +
         '<article class="rule-block">' +
-          '<h3>' + icon('sliders') + '<span>各选项默认值</span></h3>' +
+          '<h3>' + icon('sliders') + '<span>默认值</span></h3>' +
           '<ul>' +
-            '<li><b>AGENTS</b>：全部选中（包含已停用的 Agent），即不施加来源过滤。</li>' +
-            '<li><b>日期范围</b>：起止日期均留空 → 全部日期，不设上下界。</li>' +
-            '<li><b>消息范围</b>：用户消息、助手消息、工具调用、工具结果 4 类全部选中。</li>' +
-            '<li><b>导出模式</b>：全量内容（等价于 4 类全选）。</li>' +
-            '<li><b>文件格式</b>：分析包（ZIP，含 events / sessions / manifest / 数据字典）。</li>' +
-            '<li><b>内容关键词</b>：留空，不额外匹配正文或工具名。</li>' +
+            '<li>AGENTS 全部选中；日期不限；四类事件全选；输出分析包。</li>' +
+            '<li>关键词留空，不额外过滤正文或工具名。</li>' +
           '</ul>' +
         '</article>' +
         '<article class="rule-block">' +
-          '<h3>' + icon('layers') + '<span>多选与快捷选项联动</span></h3>' +
+          '<h3>' + icon('layers') + '<span>快捷联动</span></h3>' +
           '<ul>' +
-            '<li><b>时间快捷选项</b>直接改写两个日期输入框：最近一天 = 今天 1 个自然日；最近一周 = 含今天在内 7 个自然日；最近一个月 = 含今天在内 30 个自然日；全部日期 = 清空两个日期。</li>' +
-            '<li>手动修改任一日期后，快捷状态转为<b>自定义</b>；两个日期都被清空时自动回到<b>全部日期</b>。</li>' +
-            '<li><b>导出模式快捷选项</b>直接改写消息类型勾选：全量内容 = 4 类全选；仅消息 = 仅用户消息 + 助手消息。</li>' +
-            '<li>手动勾选或取消任一消息类型后，若结果恰好等于某个预设就高亮该预设，否则显示<b>自定义</b>。</li>' +
-            '<li>快捷选项只改写自己那一组条件：切换时间快捷不会改变已选消息类型，切换模式也不会改变日期。</li>' +
-            '<li>AGENTS 的「全选 / 清空 / 仅启用」只改写 Agent 选择；Agent、消息类型、日期三组条件互不覆盖。</li>' +
+            '<li>时间与消息预设只改写各自一组条件，其余条件不变。</li>' +
+            '<li>手动改选后显示为「自定义」。</li>' +
           '</ul>' +
         '</article>' +
         '<article class="rule-block">' +
-          '<h3>' + icon('calendar') + '<span>日期范围校验</span></h3>' +
+          '<h3>' + icon('calendar') + '<span>日期边界</span></h3>' +
           '<ul>' +
-            '<li>起止日期可单独留空：只填起始日表示「从该日起」，只填结束日表示「截止到该日」。</li>' +
-            '<li>起始日按本地时区当天 <b>00:00:00.000</b> 参与比较（含该时刻）；结束日按本地时区当天 <b>23:59:59.999</b> 参与比较（含该时刻），因此结束日当天的记录不会被漏掉。</li>' +
-            '<li>起始日期不得晚于结束日期；两者相同表示只导出这一天。</li>' +
-            '<li>日期格式非法或起止颠倒时，导出按钮禁用并提示原因，且不会发出试算或导出请求。</li>' +
-            '<li>允许选择未来日期，结果可能为 0 条；没有数据时仍可导出只有表头的文件。</li>' +
-            '<li>时间条件作用于事件时间（events.timestamp），不是会话创建时间；只要会话中存在命中事件，该会话就会出现在结果里。</li>' +
+            '<li>闭区间：起始日 00:00:00.000、结束日 23:59:59.999。</li>' +
+            '<li>可只填一端；起始不得晚于结束，非法时禁止导出。</li>' +
           '</ul>' +
         '</article>' +
         '<article class="rule-block">' +
-          '<h3>' + icon('filter') + '<span>导出内容筛选规则</span></h3>' +
+          '<h3>' + icon('filter') + '<span>筛选语义</span></h3>' +
           '<ul>' +
-            '<li>一条事件必须同时满足：Agent 属于已选集合、事件时间落在闭区间内、消息类型属于已选集合；若填写关键词，还要求 content 或 tool_name 包含该关键词。</li>' +
-            '<li>同一组多选内部为「或」（任一命中即可），不同组之间为「且」（必须同时满足）。</li>' +
-            '<li>导出结果按事件时间、会话、序号排序；会话表只包含命中事件所在的会话。</li>' +
-            '<li>分析包（ZIP）包含 events.csv、sessions.csv、summary.json、manifest.json、data_dictionary.md，manifest 会记录本次的 Agent、日期与类型条件。</li>' +
-            '<li>默认导出全部命中记录，不设行数上限；如在设置页配置了上限，超限时导出按钮禁用，需缩小日期范围、Agent 或消息类型。</li>' +
+            '<li>组内为「或」，组间为「且」；关键词匹配正文或工具名。</li>' +
+            '<li>按事件时间排序；会话表只含命中事件所在会话。</li>' +
           '</ul>' +
         '</article>' +
       '</div>' +

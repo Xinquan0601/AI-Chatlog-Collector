@@ -1,5 +1,5 @@
 import {
-  api, state, isAdmin, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
+  api, state, isAdmin, isCurrent, setView, skeletonPage, pageHead, pageRefresh, emptyState, icon,
   esc, attr, num, compact, agentGlyph, agentStatus, statusBadge, relTime, fmtDate,
   showToast, showModal, confirmDialog, navigate
 } from '../core.js';
@@ -63,10 +63,8 @@ function draw(agents, signal) {
   const grid = agents.length ? '<div class="agent-grid">' + cards + '</div>' : '<div class="panel"><div class="panel-body">' + emptyState('还没有 Agent 适配器', '初始化数据目录后重试。', 'nodes') + '</div></div>';
 
   const header = pageHead({
-    eyebrow: 'COLLECTORS / ' + agents.length + ' ADAPTERS',
     title: 'Agent 接入',
-    subtitle: '自由选择需要采集的 Agent。每个适配器只读取本地记录文件，统一映射为四类规范事件；关闭某个 Agent 不会删除已归档数据。',
-    actions: '<button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新状态</span></button>' + (admin ? '<button class="btn btn-primary btn-sm" data-action="sync-all">' + icon('zap') + '<span>同步全部</span></button>' : '')
+    actions: pageRefresh('刷新状态')
   });
 
   setView('<div class="page">' + header + summary + grid + '</div>', function (root, signal) {

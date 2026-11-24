@@ -1,5 +1,5 @@
 import {
-  api, state, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
+  api, state, isCurrent, setView, skeletonPage, pageHead, pageRefresh, emptyState, icon,
   esc, attr, num, bytes, fmtDate, relTime, fmtDuration, navigate, showToast,
   confirmDialog
 } from '../core.js';
@@ -88,21 +88,19 @@ function draw(candidates, runsData, token, signal) {
 
   const busy = activeRun && (activeRun.status === 'queued' || activeRun.status === 'running');
   const header = pageHead({
-    eyebrow: 'ARCHIVE INTAKE / MERGE',
     title: '数据导入',
-    subtitle: '把旧版 chatlog 导出库或另一台机器导出的 AgentTrail 档案包并入当前档案库。事件按 fingerprint 去重，重复导入只补齐缺失记录。',
-    actions: '<button class="btn btn-ghost btn-sm" data-import-refresh>' + icon('refresh') + '<span>刷新</span></button>'
+    actions: pageRefresh()
   });
 
   const html = '<div class="page">' + header +
     '<div class="backup-hero"><div class="backup-hero-icon">' + icon('upload') + '</div>' +
-    '<div class="backup-hero-copy"><h2>入库登记台</h2><p>选择旧工具导出的 .db 旧库，或另一台机器导出的 .zip 档案包；先预览会带来多少新增、多少重复，再开始合并。任务在后台执行，可随时取消，重复执行不会产生副本。</p></div>' +
+    '<div class="backup-hero-copy"><h2>入库登记台</h2><p>选择旧库或档案包，先预览新增与重复，再开始合并。重复执行不会产生副本。</p></div>' +
     '<div class="backup-actions"><span class="tag">' + (items.length ? items.length + ' 个候选文件' : '手动指定路径') + '</span></div></div>' +
-    '<div class="intake-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">来源文件</h2><p class="panel-sub">自动发现 data/ 目录及其子目录中的 .db 旧库与 .zip 档案包，也可以填写绝对路径。</p></div><span class="badge neutral">SQLite / ZIP</span></div>' +
+    '<div class="intake-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">来源文件</h2><p class="panel-sub">自动发现 data/ 下的旧库与档案包，也可填写绝对路径。</p></div><span class="badge neutral">SQLite / ZIP</span></div>' +
     '<div class="panel-body"><div class="intake-sources" id="intake-candidates">' + sourceRows + '</div>' +
     '<form class="intake-path" id="intake-path-form"><input class="input" id="intake-path" placeholder="D:/.../chatlog-export.db 或 agenttrail-20261103.zip" value="' + attr(chosenPath) + '" spellcheck="false">' +
     '<button class="btn btn-secondary btn-sm" type="submit">' + icon('search') + '<span>预览</span></button></form>' +
-    '<p class="field-help">只读取源文件，不会修改它。支持 chatlog 的 sessions / messages 库，以及本工具导出的 ZIP / CSV / JSONL / JSON 档案包。</p></div></section>' +
+    '<p class="field-help">只读源文件；支持旧库与 ZIP / CSV / JSONL / JSON 档案包。</p></div></section>' +
     '<aside class="panel"><div class="panel-head"><div><h2 class="panel-title">导入选项</h2><p class="panel-sub">选项在启动时固定，重新导入会沿用上次设置。</p></div></div>' +
     '<div class="panel-body"><div class="inline-switch" id="intake-reasoning-field"><div class="inline-switch-copy"><strong>同时导入推理过程</strong><span>仅对旧版 chatlog 旧库有效：推理片段默认跳过，开启后会作为带 reasoning 标记的助手消息写入。</span></div><label class="switch"><input id="intake-reasoning" type="checkbox"><span></span></label></div>' +
     '<div class="inline-switch"><div class="inline-switch-copy"><strong>预演模式</strong><span>只统计将要写入的事件与会话，不落库，用于确认合并范围是否正确。</span></div><label class="switch"><input id="intake-dry-run" type="checkbox"><span></span></label></div>' +
@@ -110,14 +108,8 @@ function draw(candidates, runsData, token, signal) {
     '<div id="intake-progress">' + (activeRun ? progressHtml(activeRun) : '') + '</div>' +
     '<p class="field-help">档案包按 fingerprint 与本地记录比对：相同的记为重复，只写入缺失的事件；本机没有对应 Agent 的记录会跳过并记入警告。</p></div></aside></div>' +
     '<section class="panel" id="intake-preview-panel" hidden></section>' +
-    '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">导入记录</h2><p class="panel-sub">最近 12 次导入，包含预演与中断记录。</p></div></div>' +
-    '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>会话 / 事件</th><th>去重</th><th>耗时</th><th></th></tr></thead><tbody>' + runRows + '</tbody></table></div></section>' +
-    '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">入库规则</h2><p class="panel-sub">两种来源都走同一套幂等入库流程，不重写消息内容。</p></div></div><div class="panel-body"><div class="flow-steps">' +
-    '<div class="flow-step"><span>01 SELECT</span><strong>识别来源</strong><p>读取文件头与 manifest，区分旧库还是档案包，并确认规模。</p></div>' +
-    '<div class="flow-step"><span>02 MAP</span><strong>映射来源</strong><p>旧 source 映射到当前 Agent，子会话与项目路径保留在元数据里。</p></div>' +
-    '<div class="flow-step"><span>03 DEDUPE</span><strong>按指纹去重</strong><p>旧库以 row_id、档案包以导出时的 fingerprint 比对，重复导入不会产生副本。</p></div>' +
-    '<div class="flow-step"><span>04 MERGE</span><strong>合并聚合</strong><p>会话标题、项目与 token 取已有与来源的有效值，事件数与会话统计自动重算。</p></div>' +
-    '</div></div></section></div>';
+    '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">导入记录</h2><p class="panel-sub">最近 12 次运行，含预演与中断。</p></div></div>' +
+    '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>来源</th><th>状态</th><th>会话 / 事件</th><th>去重</th><th>耗时</th><th></th></tr></thead><tbody>' + runRows + '</tbody></table></div></section></div>';
 
   setView(html, function (root, sig) {
     const pathInput = root.querySelector('#intake-path');
@@ -177,8 +169,6 @@ function draw(candidates, runsData, token, signal) {
     }, { signal: sig });
 
     root.addEventListener('click', async function (event) {
-      const refresh = event.target.closest('[data-import-refresh]');
-      if (refresh) { event.preventDefault(); navigate('import', {}, true); return; }
       const start = event.target.closest('[data-import-start]');
       if (start) {
         event.preventDefault();

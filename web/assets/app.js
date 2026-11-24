@@ -5,6 +5,7 @@ import {
   hrefFor, toQuery, currentParams, setView, skeletonPage, pageHead, emptyState,
   hydrateIcons, icon, formatRichText, prettyJson, copyText
 } from './core.js';
+import { request } from './api.js';
 
 import { render as renderOverview } from './pages/overview.js';
 import { render as renderAgents } from './pages/agents.js';
@@ -20,18 +21,18 @@ import { render as renderSettings } from './pages/settings.js';
 import { render as renderAbout } from './pages/about.js';
 
 const PAGES = {
-  overview: { title: '总览', nav: 'overview', admin: false, render: renderOverview },
-  agents: { title: 'Agent 接入', nav: 'agents', admin: false, render: renderAgents },
-  sessions: { title: '会话记录', nav: 'sessions', admin: false, render: renderSessions },
-  session: { title: '会话详情', nav: 'sessions', admin: false, render: renderSession },
-  analytics: { title: '统计分析', nav: 'analytics', admin: false, render: renderAnalytics },
-  export: { title: '数据导出', nav: 'export', admin: false, render: renderExport },
-  tasks: { title: '采集任务', nav: 'tasks', admin: false, render: renderTasks },
-  backups: { title: '数据备份', nav: 'backups', admin: true, render: renderBackups },
-  import: { title: '数据导入', nav: 'import', admin: true, render: renderImport },
-  logs: { title: '日志与审计', nav: 'logs', admin: true, render: renderLogs },
-  settings: { title: '系统设置', nav: 'settings', admin: true, render: renderSettings },
-  about: { title: '架构与文档', nav: 'about', admin: false, render: renderAbout }
+  overview: { title: '总览', section: '工作台', nav: 'overview', admin: false, render: renderOverview },
+  agents: { title: 'Agent 接入', section: '采集', nav: 'agents', admin: false, render: renderAgents },
+  sessions: { title: '会话记录', section: '工作台', nav: 'sessions', admin: false, render: renderSessions },
+  session: { title: '会话详情', section: '工作台', nav: 'sessions', admin: false, render: renderSession },
+  analytics: { title: '统计分析', section: '工作台', nav: 'analytics', admin: false, render: renderAnalytics },
+  export: { title: '数据导出', section: '工作台', nav: 'export', admin: false, render: renderExport },
+  tasks: { title: '采集任务', section: '采集', nav: 'tasks', admin: false, render: renderTasks },
+  backups: { title: '数据备份', section: '系统', nav: 'backups', admin: true, render: renderBackups },
+  import: { title: '数据导入', section: '采集', nav: 'import', admin: true, render: renderImport },
+  logs: { title: '日志与审计', section: '系统', nav: 'logs', admin: true, render: renderLogs },
+  settings: { title: '系统设置', section: '系统', nav: 'settings', admin: true, render: renderSettings },
+  about: { title: '架构与文档', section: '系统', nav: 'about', admin: false, render: renderAbout }
 };
 
 let routeAbort = null;
@@ -94,6 +95,8 @@ function clearPageTimers() {
 function updateNavigation(routeInfo) {
   const page = PAGES[routeInfo.name];
   document.getElementById('topbar-title').textContent = page.title;
+  const section = document.getElementById('topbar-section');
+  if (section) section.textContent = page.section;
   document.title = page.title + ' · 迹录 AgentTrail';
   $$('.nav-link').forEach(function (link) {
     link.classList.toggle('active', link.dataset.route === page.nav);
@@ -267,7 +270,7 @@ async function handleLogin(event) {
 }
 
 async function logout() {
-  try { await api.post('/api/auth/logout', {}); } catch (error) { /* clear locally anyway */ }
+  try { await request('/api/auth/logout', { method: 'POST' }); } catch (error) { /* clear locally anyway */ }
   state.user = null;
   state.permissions = { admin: false };
   state.agents = [];
@@ -386,7 +389,6 @@ async function performSearch(query) {
 }
 
 function handleGlobalAction(action, element) {
-  if (action === 'logout') { logout(); return true; }
   if (action === 'open-sidebar') { openSidebar(); return true; }
   if (action === 'close-sidebar') { closeSidebar(); return true; }
   if (action === 'focus-search') {
@@ -433,6 +435,15 @@ function bindGlobalEvents() {
     if (searchWrap && !searchWrap.contains(event.target)) closeSearch();
   });
 
+  // A click on the already-active destination does not emit hashchange, so the
+  // mobile drawer would stay open. Close it on any plain sidebar navigation.
+  document.addEventListener('click', function (event) {
+    const link = event.target.closest('#sidebar a[href^="#/"]');
+    if (!link || event.defaultPrevented) return;
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    closeSidebar();
+  });
+
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') {
       closeSearch();
@@ -460,7 +471,6 @@ function bindGlobalEvents() {
       showToast('登录状态已失效，请重新登录', 'error');
     }
   });
-  window.addEventListener('agenttrail:open-password', function () { showPasswordModal(); });
   window.addEventListener('agenttrail:settings-updated', function (event) {
     if (event.detail) state.settings = event.detail;
     updateChrome();

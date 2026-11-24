@@ -55,6 +55,8 @@
   --radius-xl: 24px;
   --sidebar-w: 258px;
   --topbar-h: 66px;
+  --page-gutter: 30px;
+  --panel-pad-x: 18px;
 
   /* spacing scale · 8px baseline */
   --gap-page: 16px;
@@ -604,7 +606,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .45; 
 .topbar {
   position: sticky; top: 0; z-index: 30;
   display: flex; align-items: center; gap: 18px;
-  height: var(--topbar-h); padding: 0 30px;
+  height: var(--topbar-h); padding: 0 var(--page-gutter);
   border-bottom: 1px solid var(--line);
   background: rgba(250, 247, 240, .86);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
@@ -613,7 +615,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .45; 
 .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 168px; }
 .topbar-location { display: flex; flex-direction: column; line-height: 1.2; }
 .topbar-kicker {
-  font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em;
   text-transform: uppercase; color: var(--muted-2);
 }
 #topbar-title { margin-top: 3px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
@@ -691,15 +693,22 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .45; 
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .mobile-search-button { display: none; }
 
-.view { padding: 26px 30px 56px; outline: none; }
+.view { padding: 26px var(--page-gutter) 56px; outline: none; }
 .page { display: flex; flex-direction: column; gap: var(--gap-page, 16px); max-width: 1560px; }
 
 /* ==========================================================================
    Page structure
    ========================================================================== */
 
-.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; padding: 2px 0 4px; }
-.page-head-main { max-width: 780px; }
+.page-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  column-gap: clamp(12px, 1.6vw, 24px);
+  row-gap: 10px;
+  padding: 2px 0 4px;
+}
+.page-head-main { min-width: 0; max-width: 780px; }
 .page-eyebrow { display: block; margin-bottom: 10px; }
 .page-title {
   margin: 0;
@@ -708,13 +717,18 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .45; 
   color: var(--ink);
 }
 .page-sub { margin: 9px 0 0; font-size: 12.5px; line-height: 1.7; color: var(--muted); max-width: min(100%, 660px); text-wrap: pretty; }
-.page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.page-actions {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 8px; flex-wrap: wrap;
+  justify-self: end; max-width: 100%;
+}
+.page-refresh { border-color: var(--line-soft); background: transparent; }
 
 .section-head {
   display: flex; align-items: flex-end; justify-content: space-between;
   gap: 18px; flex-wrap: wrap;
   margin: 0;
-  padding-top: 16px;
+  padding: 16px var(--panel-pad-x) 0;
   border-top: 1px solid var(--line-soft);
 }
 .section-head h2 { margin: 0; font-size: 15px; font-weight: 620; letter-spacing: -.018em; }
@@ -744,13 +758,13 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .45; 
 .panel-head {
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 16px; flex-wrap: wrap;
-  padding: 16px 18px 13px;
+  padding: 16px var(--panel-pad-x) 13px;
   border-bottom: 1px solid var(--line-soft);
 }
 .panel-title { margin: 0; font-size: 13.5px; font-weight: 620; letter-spacing: -.015em; }
 .panel-sub { margin: 4px 0 0; font-size: 11.5px; line-height: 1.6; color: var(--muted); }
 .panel-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.panel-body { padding: 16px 18px; }
+.panel-body { padding: 16px var(--panel-pad-x); }
 .panel-body.tight { padding: 10px 12px; }
 .panel-body.flush { padding: 0; }
 
@@ -2239,9 +2253,8 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .45; 
    ========================================================================== */
 
 @media (max-width: 1420px) {
-  :root { --sidebar-w: 240px; }
-  .view { padding: 24px 24px 48px; }
-  .topbar { padding: 0 24px; }
+  :root { --sidebar-w: 240px; --page-gutter: 24px; }
+  .view { padding-block: 24px 48px; }
   .kpi-grid { gap: 10px; }
 }
 
@@ -2288,23 +2301,23 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .45; 
 }
 
 @media (max-width: 760px) {
-  .topbar { height: 58px; padding: 0 14px; gap: 8px; }
+  :root { --page-gutter: 14px; --panel-pad-x: 14px; }
+  .topbar { height: 58px; gap: 8px; }
   .topbar-left { min-width: 0; flex: 1; }
   .topbar-center { display: none; }
   .topbar-sync span:last-child { display: none; }
   .mobile-search-button { display: inline-grid; }
-  .view { padding: 16px 14px 44px; }
+  .view { padding-block: 16px 44px; }
   .page { gap: 12px; }
-  .page-head { align-items: flex-start; gap: 14px; }
+  .page-head { align-items: end; column-gap: 12px; row-gap: 8px; }
   .page-title { font-size: 22px; }
   .page-sub { font-size: 12px; }
-  .page-actions { width: 100%; }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .kpi-card { padding: 12px 12px 11px; }
   .kpi-value { font-size: 19px; }
   .kpi-spark { display: none; }
-  .panel-head { padding: 13px 14px 11px; }
-  .panel-body { padding: 13px 14px; }
+  .panel-head { padding-block: 13px 11px; }
+  .panel-body { padding-block: 13px; }
   .summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summary-cell:nth-child(2n) { border-right: 0; }
   .summary-cell:nth-child(n+3) { border-top: 1px solid var(--line-soft); }
@@ -2371,6 +2384,11 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .45; 
   .summary-cell:first-child { border-top: 0; }
   .tabs { width: 100%; }
   .tab { flex: 1; text-align: center; padding: 6px 8px; }
+}
+
+@media (max-width: 340px) {
+  .page-head { grid-template-columns: minmax(0, 1fr); }
+  .page-actions { justify-self: start; }
 }
 
 /* ==========================================================================

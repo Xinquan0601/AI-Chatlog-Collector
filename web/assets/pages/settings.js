@@ -1,5 +1,5 @@
 import {
-  api, state, isCurrent, setView, skeletonPage, pageHead, emptyState, icon, esc, attr,
+  api, state, isCurrent, setView, skeletonPage, pageHead, pageRefresh, emptyState, icon, esc, attr,
   num, bytes, fmtFull, relTime, initial, showToast, showModal, confirmDialog, copyText
 } from '../core.js';
 
@@ -46,14 +46,14 @@ function draw(settingsData, usersData, signal) {
     '<div class="field"><label class="field-label" for="setting-retry">默认失败重试次数</label><input class="input" id="setting-retry" type="number" min="1" max="10" value="' + Number(settings.auto_retry_attempts || 3) + '"></div>' +
     '</div><div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">' + icon('save') + '<span>保存通用设置</span></button></div></form></div></section>';
 
-  const collection = '<section class="panel settings-section" id="settings-collection"><div class="panel-head"><div><h2 class="panel-title">采集策略</h2><p class="panel-sub">增量同步、去重与失败重试</p></div><span class="badge accent">DEDUP ON</span></div><div class="panel-body"><div class="storage-note" style="margin-top:0;line-height:1.8">采集采用两层幂等保护：文件级游标避免重复读取，事件级 <b class="mono">fingerprint</b> 在 SQLite 唯一索引上阻止重复写入。压缩流与 SQLite 来源无法按字节定位时会重扫，但重复事件不会重复入库。<br><br>Agent 的数据源路径、匹配模式、间隔与重试次数在「Agent 接入」中分别配置。</div><div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><a class="btn btn-secondary btn-sm" href="#/agents">' + icon('nodes') + '<span>前往 Agent 接入</span></a><a class="btn btn-ghost btn-sm" href="#/tasks">' + icon('activity') + '<span>查看采集任务</span></a></div></div></section>';
+  const collection = '<section class="panel settings-section" id="settings-collection"><div class="panel-head"><div><h2 class="panel-title">采集策略</h2><p class="panel-sub">增量同步、去重与失败重试</p></div><span class="badge accent">DEDUP ON</span></div><div class="panel-body"><div class="storage-note" style="margin-top:0;line-height:1.8">文件游标避免重复读取，事件级 <b class="mono">fingerprint</b> 唯一索引阻止重复写入；无法按字节定位的来源会重扫，但不会重复入库。<br><br>路径、匹配模式与调度间隔在「Agent 接入」中配置。</div><div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><a class="btn btn-secondary btn-sm" href="#/agents">' + icon('nodes') + '<span>前往 Agent 接入</span></a></div></div></section>';
 
   const backup = '<section class="panel settings-section" id="settings-backup"><div class="panel-head"><div><h2 class="panel-title">备份与导出</h2><p class="panel-sub">本地快照与导出行数上限</p></div><span class="badge neutral">LOCAL ONLY</span></div><div class="panel-body"><form id="settings-backup-form"><div class="settings-form">' +
     '<div class="field full"><div class="inline-switch"><div class="inline-switch-copy"><strong>启用自动备份</strong><span>调度器按间隔创建 SQLite 一致性快照。</span></div><label class="switch"><input id="setting-auto-backup" type="checkbox"' + (settings.auto_backup_enabled ? ' checked' : '') + '><span></span></label></div></div>' +
     '<div class="field"><label class="field-label" for="setting-backup-interval">备份间隔（小时）</label><input class="input" id="setting-backup-interval" type="number" min="1" max="168" value="' + Number(settings.backup_interval_hours || 24) + '"></div>' +
     '<div class="field"><label class="field-label" for="setting-backup-retention">保留备份数量</label><input class="input" id="setting-backup-retention" type="number" min="1" max="30" value="' + Number(settings.backup_retention || 7) + '"></div>' +
     '<div class="field"><label class="field-label" for="setting-export-max">单次导出行数上限（0 = 不限制）</label><input class="input" id="setting-export-max" type="number" min="0" max="1000000" step="1000" value="' + Number(settings.export_max_rows == null ? 0 : settings.export_max_rows) + '"><p class="field-help">0 表示不限制，导出全部命中记录；正数上限最大 1,000,000。</p></div>' +
-    '<div class="field"><label class="field-label">数据保留策略</label><div class="input" style="display:flex;align-items:center;color:var(--muted);font-size:11px">永久保留 · 不做自动清理</div></div>' +
+    '<div class="field"><span class="field-label">数据保留策略</span><p class="field-help">永久保留，不做自动清理。</p></div>' +
     '</div><div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">' + icon('save') + '<span>保存备份设置</span></button></div></form></div></section>';
 
   const userRows = users.length ? users.map(function (user) {
@@ -67,10 +67,9 @@ function draw(settingsData, usersData, signal) {
   const usersSection = '<section class="panel settings-section" id="settings-users"><div class="panel-head"><div><h2 class="panel-title">成员与权限</h2><p class="panel-sub">管理员可配置采集和系统；只读成员可浏览、搜索与导出</p></div><button class="btn btn-primary btn-sm" data-user-create>' + icon('plus') + '<span>新增成员</span></button></div><div class="table-wrap" style="margin-top:10px"><table class="data-table"><thead><tr><th>成员</th><th>角色</th><th>状态</th><th>最近登录</th><th></th></tr></thead><tbody>' + userRows + '</tbody></table></div></section>';
 
   const security = '<section class="panel settings-section" id="settings-security"><div class="panel-head"><div><h2 class="panel-title">安全与会话</h2><p class="panel-sub">访问控制与会话保护</p></div><span class="badge accent">' + icon('shield') + ' PROTECTED</span></div><div class="panel-body">' +
-    '<div class="inline-switch" style="padding-top:0"><div class="inline-switch-copy"><strong>当前登录</strong><span>' + esc(state.user.username) + ' · ' + (state.user.role === 'admin' ? '管理员' : '只读成员') + ' · ' + esc(state.settings.timezone || 'Asia/Shanghai') + '</span></div><button class="btn btn-secondary btn-sm" data-settings-password>' + icon('key') + '<span>修改密码</span></button></div>' +
-    '<div class="inline-switch"><div class="inline-switch-copy"><strong>会话保护</strong><span>HttpOnly Cookie · SameSite=Strict · 同源请求头校验 · 登录限流</span></div><span class="badge accent"><span class="dot"></span>已启用</span></div>' +
+    '<div class="inline-switch" style="padding-top:0"><div class="inline-switch-copy"><strong>会话保护</strong><span>HttpOnly Cookie · SameSite=Strict · 同源请求头校验 · 登录限流</span></div><span class="badge accent"><span class="dot"></span>已启用</span></div>' +
     '<div class="inline-switch"><div class="inline-switch-copy"><strong>审计轨迹</strong><span>登录、配置、导出与备份操作写入审计表，不提供修改接口。</span></div><a class="btn btn-ghost btn-xs" href="#/logs?tab=audit">查看审计' + icon('arrow-right') + '</a></div>' +
-    '<div class="storage-note">初始管理员为 <b class="mono">admin</b>。若仍在使用默认密码 <b class="mono">admin123</b>，请立即修改。部署在非本机环境时，应同时启用 HTTPS 反向代理并设置 <b class="mono">AGENTTRAIL_SECURE_COOKIE=1</b>。</div>' +
+    '<div class="storage-note">首次登录后请立即修改初始密码。非本机部署请启用 HTTPS 反向代理，并设置 <b class="mono">AGENTTRAIL_SECURE_COOKIE=1</b>。</div>' +
     '</div></section>';
 
   const pathsList = '<div class="path-list">' + [
@@ -82,10 +81,8 @@ function draw(settingsData, usersData, signal) {
   const system = '<section class="panel settings-section" id="settings-system"><div class="panel-head"><div><h2 class="panel-title">系统信息</h2><p class="panel-sub">运行环境与数据规模</p></div><span class="badge neutral">v' + esc(state.boot.app.version) + '</span></div><div class="panel-body"><div class="settings-form" style="margin-bottom:14px"><div class="analytics-kpi"><span>会话</span><b>' + num(counts.sessions) + '</b><small>SESSIONS</small></div><div class="analytics-kpi"><span>事件</span><b>' + num(counts.events) + '</b><small>EVENTS</small></div><div class="analytics-kpi"><span>数据源</span><b>' + num(counts.sources) + '</b><small>SOURCES</small></div><div class="analytics-kpi"><span>用户</span><b>' + num(counts.users) + '</b><small>USERS</small></div></div>' + pathsList + '</div></section>';
 
   const header = pageHead({
-    eyebrow: 'CONFIGURATION / ADMIN ONLY',
     title: '系统设置',
-    subtitle: '配置调度、备份、用户与访问安全。所有变更都会写入审计日志。',
-    actions: '<button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button>'
+    actions: pageRefresh()
   });
 
   setView('<div class="page">' + header + '<div class="settings-layout">' + nav + '<div class="settings-panels">' + general + collection + backup + usersSection + security + system + '</div></div></div>', function (root, sig) {
@@ -102,11 +99,6 @@ function draw(settingsData, usersData, signal) {
       if (copy) {
         event.preventDefault();
         copyText(copy.dataset.copyPath).then(function (ok) { showToast(ok ? '路径已复制' : '复制失败', ok ? 'success' : 'error'); });
-        return;
-      }
-      if (event.target.closest('[data-settings-password]')) {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent('agenttrail:open-password'));
         return;
       }
       if (event.target.closest('[data-user-create]')) {

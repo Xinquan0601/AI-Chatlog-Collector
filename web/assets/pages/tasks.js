@@ -1,5 +1,5 @@
 import {
-  api, state, isAdmin, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
+  api, state, isAdmin, isCurrent, setView, skeletonPage, pageHead, pageRefresh, emptyState, icon,
   esc, attr, num, agentGlyph, agentOptions, jobStatus, jobStatusBadge, fmtDate,
   fmtDuration, relTime, pagination, navigate, showToast, showModal, prettyJson
 } from '../core.js';
@@ -37,8 +37,7 @@ function draw(data, query, signal) {
   const total = Number(data.total || 0);
   const filters = '<form id="task-filter-form" class="filter-bar"><div class="filter-field"><span class="filter-label">STATUS</span><select class="select" id="task-status"><option value="all">全部状态</option><option value="queued"' + (query.status === 'queued' ? ' selected' : '') + '>排队中</option><option value="running"' + (query.status === 'running' ? ' selected' : '') + '>采集中</option><option value="success"' + (query.status === 'success' ? ' selected' : '') + '>已完成</option><option value="partial"' + (query.status === 'partial' ? ' selected' : '') + '>部分完成</option><option value="failed"' + (query.status === 'failed' ? ' selected' : '') + '>失败</option></select></div>' +
     '<div class="filter-field"><span class="filter-label">AGENT</span><select class="select" id="task-agent">' + agentOptions(query.agent) + '</select></div>' +
-    '<div class="filter-actions"><button class="btn btn-primary btn-sm" type="submit">' + icon('filter') + '<span>应用</span></button>' +
-    '<button class="btn btn-ghost btn-sm" type="button" data-task-refresh>' + icon('refresh') + '<span>刷新</span></button></div></form>';
+    '<div class="filter-actions"><button class="btn btn-primary btn-sm" type="submit">' + icon('filter') + '<span>应用</span></button></div></form>';
 
   const rows = items.length ? items.map(function (job) {
     const agent = { key: job.agent_key, name: job.agent_name, color: job.agent_color };
@@ -60,10 +59,8 @@ function draw(data, query, signal) {
     '<div class="task-stat"><span>任务总数</span><b>' + num(total) + '</b><small class="dim">ALL RUNS</small></div></div>';
 
   const header = pageHead({
-    eyebrow: 'PIPELINE / INGESTION JOBS',
     title: '采集任务',
-    subtitle: '查看采集任务队列、增量进度与失败原因。任务由后台工作线程执行，失败会按配置自动重试；也可以手动重跑最近结束的任务。',
-    actions: '<button class="btn btn-ghost btn-sm" data-task-refresh>' + icon('refresh') + '<span>刷新</span></button>' + (isAdmin() ? '<button class="btn btn-primary btn-sm" data-action="sync-all">' + icon('zap') + '<span>同步全部</span></button>' : '')
+    actions: pageRefresh()
   });
 
   const html = '<div class="page">' + header + summary + filters +
@@ -79,8 +76,6 @@ function draw(data, query, signal) {
     }, { signal: sig });
 
     root.addEventListener('click', function (event) {
-      const refresh = event.target.closest('[data-task-refresh]');
-      if (refresh) { event.preventDefault(); navigate('tasks', { status: query.status, agent: query.agent, page: query.page }, true); return; }
       const detail = event.target.closest('[data-task-detail]');
       if (detail) { event.preventDefault(); openTask(detail.dataset.taskDetail); return; }
       const retry = event.target.closest('[data-task-retry]');

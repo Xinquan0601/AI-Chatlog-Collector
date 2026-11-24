@@ -1,6 +1,6 @@
 import {
-  api, state, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
-  esc, attr, num, compact, pct, agentGlyph, agentOptions, eventMeta, fmtDate,
+  api, isCurrent, setView, skeletonPage, pageHead, pageRefresh, emptyState, icon,
+  esc, attr, num, compact, pct, agentGlyph, agentOptions, eventMeta,
   stackedChart, donutSvg, typeLegend, kpiCard, legendSwatch, navigate, showToast,
   localInput, fromLocal, toQuery
 } from '../core.js';
@@ -103,33 +103,20 @@ function draw(data, query, signal) {
       return '<tr><td class="tool-name-cell">' + esc(tool.tool_name) + '</td><td class="num">' + num(tool.calls) + '</td><td><div class="bar-track"><i style="width:' + Math.max(4, Math.round(Number(tool.calls || 0) * 100 / toolMax)) + '%"></i></div></td><td class="num ' + (Number(tool.errors || 0) ? 'text-danger' : '') + '">' + num(tool.errors || 0) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : emptyState('暂无工具调用', '当前筛选范围内没有工具事件。', 'tool')) + '</div></section>';
 
-  const projectsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">项目覆盖</h2><p class="panel-sub">事件最活跃的工作区</p></div><a class="btn btn-ghost btn-xs" href="#/sessions">浏览会话' + icon('arrow-right') + '</a></div><div class="panel-body flush">' +
+  const projectsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">项目覆盖</h2><p class="panel-sub">事件最活跃的工作区</p></div></div><div class="panel-body flush">' +
     (projects.length ? '<div class="table-wrap"><table class="data-table fixed projects-table"><thead><tr><th>项目</th><th class="num">会话</th><th class="num">事件</th></tr></thead><tbody>' + projects.map(function (project) {
       return '<tr><td class="cell-main">' + esc(project.project) + '</td><td class="num">' + num(project.sessions) + '</td><td class="num">' + num(project.events) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : emptyState('暂无项目信息', '来源记录未提供工作区元数据。', 'folder')) + '</div></section>';
 
-  const formats = [
-    { key: 'bundle', title: '分析包 ZIP', desc: '事件 CSV、会话摘要、汇总、字典与 manifest，适合直接分析或归档。', ext: '.zip' },
-    { key: 'csv', title: '事件明细 CSV', desc: '扁平表结构，兼容 Excel / pandas / BI 工具。', ext: '.csv' },
-    { key: 'jsonl', title: '规范化 JSONL', desc: '一行一个事件对象，适合日志管线与流式处理。', ext: '.jsonl' }
-  ];
-  const formatCards = formats.map(function (format) {
-    return '<button class="format-card ' + (state.analyticsFormat === format.key ? 'selected' : '') + '" type="button" data-format="' + format.key + '"><div class="format-top"><strong>' + format.title + '</strong><span class="format-icon">' + icon(format.key === 'bundle' ? 'archive' : format.key === 'csv' ? 'file-text' : 'code') + '</span></div><p>' + format.desc + '</p><div class="format-ext mono">' + format.ext + '</div></button>';
-  }).join('');
-
-  const exportPanel = '<section class="panel export-panel"><div class="panel-head"><div><h2 class="panel-title">导出分析数据</h2><p class="panel-sub">当前筛选：' + esc(agentLabel) + ' · ' + esc(rangeLabel) + ' · ' + num(summary.events) + ' 条事件</p></div><span class="badge accent"><span class="dot"></span>READY</span></div><div class="panel-body"><div class="export-grid">' + formatCards + '</div><div class="export-actions"><div class="export-hint">导出会保留统一后的四类事件结构，并附带工具调用关联 ID 与 <b>fingerprint</b>。时间字段统一为 UTC ISO-8601，便于跨时区分析。</div><button class="btn btn-primary" type="button" data-export-analytics>' + icon('download') + '<span>导出 ' + (state.analyticsFormat === 'bundle' ? '分析包' : state.analyticsFormat === 'csv' ? 'CSV' : 'JSONL') + '</span></button></div></div></section>';
-
   const header = pageHead({
-    eyebrow: 'ANALYTICS / UNIFIED EVENT MODEL',
     title: '统计分析',
-    subtitle: '从会话总量、消息结构到工具调用成功率，以统一口径观察多个 Agent 的工作负载。',
-    actions: '<a class="btn btn-secondary btn-sm" href="#/sessions">' + icon('message') + '<span>查看会话</span></a><button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button>'
+    actions: pageRefresh()
   });
 
   setView('<div class="page">' + header + chips + filterBar + kpis +
     '<div class="analytics-top">' + activity + typePanel + '</div>' +
     '<div class="overview-grid equal">' + agentPanel + toolsPanel + '</div>' +
-    '<div class="overview-grid"><div class="overview-stack">' + projectsPanel + '</div><div class="overview-stack">' + exportPanel + '</div></div>' +
+    projectsPanel +
     '</div>', function (root, sig) {
       root.addEventListener('submit', function (event) {
         const form = event.target.closest('#analytics-filter-form');
@@ -150,14 +137,6 @@ function draw(data, query, signal) {
           navigate('analytics', { agent: query.agent, range: item ? item.key : '30d' }, true);
           return;
         }
-        const format = event.target.closest('[data-format]');
-        if (format) {
-          state.analyticsFormat = format.dataset.format;
-          root.querySelectorAll('[data-format]').forEach(function (element) { element.classList.toggle('selected', element === format); });
-          const label = state.analyticsFormat === 'bundle' ? '分析包' : state.analyticsFormat === 'csv' ? 'CSV' : 'JSONL';
-          root.querySelectorAll('[data-export-analytics] span:last-child').forEach(function (element) { element.textContent = '导出 ' + label; });
-          return;
-        }
         const exportButton = event.target.closest('[data-export-analytics]');
         if (exportButton) {
           event.preventDefault();
@@ -170,7 +149,7 @@ function draw(data, query, signal) {
 function exportData(query) {
   openExportDialog({
     context: { agent: query.agent === 'all' ? '' : query.agent, from: query.from, to: query.to },
-    format: state.analyticsFormat || 'bundle',
+    format: 'bundle',
     range: query.from ? 'custom' : (query.range || 'all'),
     title: '导出分析数据',
     subtitle: '按角色与时间范围导出规范事件，可直接用于 Excel、pandas 或归档。'

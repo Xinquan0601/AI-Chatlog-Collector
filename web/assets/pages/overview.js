@@ -1,7 +1,7 @@
 import {
-  api, state, isAdmin, isCurrent, setView, skeletonPage, pageHead, kpiCard, sparkline,
+  api, isAdmin, isCurrent, setView, skeletonPage, pageHead, pageRefresh, kpiCard, sparkline,
   stackedChart, typeLegend, emptyState, icon, esc, attr, num, compact, bytes, pct,
-  agentGlyph, renderAgentMini, agentStatus, relTime, fmtDate, fmtDuration, jobStatus
+  agentGlyph, renderAgentMini, relTime, fmtDate, fmtDuration, jobStatus
 } from '../core.js';
 
 export async function render(params, token) {
@@ -64,7 +64,7 @@ function draw(data) {
       '<div class="job-row-main"><div class="job-row-title"><strong>' + esc(agent.name) + '</strong><span class="status-dot ' + status.dot + '"></span><span class="tag">' + esc(job.trigger || 'manual') + '</span></div><div class="job-row-meta">' + esc(job.message || status.label) + ' · ' + relTime(job.started_at || job.queued_at) + '</div>' +
       (job.status === 'running' ? '<div class="progress-line"><i style="width:' + Number(job.progress || 0) + '%"></i></div>' : '') + '</div>' +
       '<div class="job-status">' + statusBadgeForJob(job.status) + '</div></div>';
-  }).join('') : emptyState('暂无采集任务', '点击右上角「同步全部」启动第一次采集。', 'activity');
+  }).join('') : emptyState('暂无采集任务', isAdmin() ? '使用顶部「同步全部」启动第一次采集。' : '等待管理员启动采集后查看进度。', 'activity');
 
   const jobsPanel = '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">采集队列</h2><p class="panel-sub">任务进度与最近状态</p></div><div class="panel-actions"><a class="btn btn-ghost btn-xs" href="#/tasks">全部任务' + icon('arrow-right') + '</a></div></div><div class="panel-body"><div class="job-list">' + jobRows + '</div></div></section>';
 
@@ -73,7 +73,7 @@ function draw(data) {
     '<div class="storage-info"><div class="storage-row"><span>数据库</span><b>' + bytes(totals.db_size) + '</b></div><div class="storage-row"><span>备份</span><b>' + bytes(totals.backup_size) + '</b></div><div class="storage-row"><span>有效数据源</span><b>' + num(totals.active_sources) + '</b></div><div class="storage-row"><span>异常数据源</span><b class="' + (totals.source_errors ? 'text-danger' : '') + '">' + num(totals.source_errors) + '</b></div></div></div>' +
     '<div class="storage-note">输入 token <b class="mono" style="color:var(--text-soft)">' + compact(totals.tokens_input) + '</b> · 输出 <b class="mono" style="color:var(--text-soft)">' + compact(totals.tokens_output) + '</b><br>原始记录始终保留，规范化数据可重复导出。</div></div></section>';
 
-  const agentStrip = agents.length ? '<div class="agent-strip">' + agents.map(renderAgentMini).join('') + '</div>' : '<div class="panel"><div class="panel-body">' + emptyState('尚未接入 Agent', '前往 Agent 接入页配置数据源', 'nodes') + '</div></div>';
+  const agentStrip = agents.length ? '<div class="agent-strip">' + agents.map(renderAgentMini).join('') + '</div>' : '<div class="panel"><div class="panel-body">' + emptyState('尚未接入 Agent', isAdmin() ? '前往 Agent 接入页配置数据源。' : '等待管理员接入 Agent 后查看覆盖状态。', 'nodes') + '</div></div>';
 
   const recentRows = recent.length ? recent.map(function (session) {
     const agent = { key: session.agent_key, name: session.agent_name, color: session.agent_color };
@@ -87,20 +87,16 @@ function draw(data) {
 
   const recentPanel = '<section class="panel"><div class="table-wrap"><table class="data-table fixed recent-table"><thead><tr><th>会话</th><th>Agent</th><th>开始时间</th><th>消息 / 工具</th><th class="num col-wide">Token</th><th></th></tr></thead><tbody>' + recentRows + '</tbody></table></div></section>';
 
-  const actionButtons = '<button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button>' +
-    (isAdmin() ? '<button class="btn btn-primary btn-sm" data-action="sync-all">' + icon('refresh') + '<span>同步全部</span></button>' : '') +
-    '<a class="btn btn-secondary btn-sm" href="#/analytics">' + icon('chart') + '<span>统计分析</span></a>';
+  const actionButtons = pageRefresh();
 
   const html = '<div class="page">' +
     pageHead({
-      eyebrow: 'OVERVIEW / 14 DAYS',
-      title: '采集总览',
-      subtitle: '所有 Agent 的对话轨迹在这里汇合。统一规范为消息、工具调用与工具结果四类结构，可检索、可统计、可导出。',
+      title: '总览',
       actions: actionButtons
     }) +
     kpis +
     '<div class="overview-grid"><div class="overview-stack">' + activity + topTools + '</div><div class="overview-stack">' + jobsPanel + storage + '</div></div>' +
-    '<div class="section-head"><div><h2>Agent 接入状态</h2><p>当前工作站的采集覆盖面</p></div><div class="section-meta">' + num(agentEventTotal) + ' EVENTS ACROSS ' + agents.length + ' AGENTS · <a href="#/agents" style="color:var(--accent)">配置接入</a></div></div>' +
+    '<div class="section-head"><div><h2>Agent 接入状态</h2><p>当前工作站的采集覆盖面</p></div><div class="section-meta">' + num(agentEventTotal) + ' EVENTS · ' + agents.length + ' AGENTS</div></div>' +
     agentStrip +
     '<div class="section-head"><div><h2>最近会话</h2><p>快速回到最有价值的上下文</p></div><div class="section-actions"><span class="section-meta">LAST 8 SESSIONS</span><a class="btn btn-ghost btn-xs" href="#/sessions">浏览全部' + icon('arrow-right') + '</a></div></div>' +
     recentPanel +

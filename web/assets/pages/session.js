@@ -143,9 +143,7 @@ function draw(data, query, id, signal) {
     }).join('') + '</div>' : '<p class="modal-text">本会话没有工具调用。</p>') +
     '</div></section>';
 
-  const exportPanel = '<section class="panel"><div class="panel-body"><div style="display:flex;gap:9px;align-items:flex-start"><span class="backup-file-icon">' + icon('archive') + '</span><div><h3 class="panel-title" style="margin-bottom:4px">分析与归档</h3><p class="modal-text">导出本会话的全部规范事件、会话摘要与数据字典，适合离线分析。</p></div></div><button class="btn btn-secondary btn-sm btn-block" style="margin-top:12px" data-export-session="' + session.id + '" data-export-title="' + attr(session.title || '') + '">' + icon('download') + '<span>导出本会话</span></button></div></section>';
-
-  const html = '<div class="page">' + header + summary + '<div class="detail-layout"><div class="detail-main">' + timeline + '</div><aside class="detail-side">' + metaPanel + toolsPanel + exportPanel + '</aside></div></div>';
+  const html = '<div class="page">' + header + summary + '<div class="detail-layout"><div class="detail-main">' + timeline + '</div><aside class="detail-side">' + metaPanel + toolsPanel + '</aside></div></div>';
 
   setView(html, function (root, sig) {
     root.addEventListener('click', function (event) {

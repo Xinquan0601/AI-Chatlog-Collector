@@ -1,5 +1,5 @@
 import {
-  api, state, isCurrent, setView, skeletonPage, pageHead, emptyState, icon,
+  api, state, isAdmin, isCurrent, setView, skeletonPage, pageHead, pageRefresh, emptyState, icon,
   esc, attr, num, compact, agentGlyph, agentOptions, fmtDate, fmtDuration, relTime,
   localInput, fromLocal, pagination, navigate, showToast, toQuery
 } from '../core.js';
@@ -51,7 +51,7 @@ function draw(data, query, signal) {
 
   const activeRange = query.from ? (rangeLabel(query.from)) : 'all';
   const filterBar = '<form id="session-filter-form" class="filter-bar">' +
-    '<div class="filter-field grow"><span class="filter-label">SEARCH</span><div class="input-wrap"><span class="input-icon">' + icon('search') + '</span><input class="input" id="session-search" name="q" value="' + attr(query.q) + '" placeholder="搜索标题、项目或消息正文…"></div></div>' +
+    '<div class="filter-field grow"><span class="filter-label">SEARCH</span><div class="input-wrap"><span class="input-icon">' + icon('search') + '</span><input class="input" id="session-search" name="q" value="' + attr(query.q) + '" placeholder="筛选标题、项目或正文…"></div></div>' +
     '<div class="filter-field"><span class="filter-label">AGENT</span><select class="select" id="session-agent">' + agentOptions(query.agent) + '</select></div>' +
     '<div class="filter-field"><span class="filter-label">FROM</span><input class="input" id="session-from" type="datetime-local" value="' + attr(localInput(query.from)) + '"></div>' +
     '<div class="filter-field"><span class="filter-label">TO</span><input class="input" id="session-to" type="datetime-local" value="' + attr(localInput(query.to)) + '"></div>' +
@@ -67,13 +67,11 @@ function draw(data, query, signal) {
     pagination(data, 'sessions', query);
 
   const header = pageHead({
-    eyebrow: 'ARCHIVE / NORMALIZED TRACES',
     title: '会话记录',
-    subtitle: '跨越不同 Agent 的统一会话索引。支持 Agent、时间范围、项目与正文搜索，按事件量或更新时间排序。',
-    actions: '<a class="btn btn-secondary btn-sm" href="#/analytics">' + icon('chart') + '<span>统计分析</span></a><button class="btn btn-ghost btn-sm" data-action="reload-page">' + icon('refresh') + '<span>刷新</span></button>'
+    actions: pageRefresh()
   });
 
-  const emptyHint = !rows.length && !hasFilter ? '<div class="empty-panel">' + emptyState('档案库还是空的', '先在 Agent 接入页配置数据源，再触发一次全量同步。', 'message') + '<a class="btn btn-primary btn-sm" href="#/agents">前往 Agent 接入</a></div>' : '';
+  const emptyHint = !rows.length && !hasFilter ? '<div class="empty-panel">' + emptyState('档案库还是空的', isAdmin() ? '先在 Agent 接入页配置数据源，再使用顶部「同步全部」触发采集。' : '等待管理员完成首次采集后即可浏览。', 'message') + '<a class="btn btn-primary btn-sm" href="#/agents">查看 Agent 接入</a></div>' : '';
 
   setView('<div class="page">' + header + quick + filterBar + emptyHint + table + '</div>', function (root, sig) {
     root.addEventListener('submit', function (event) {
